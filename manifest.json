@@ -1,0 +1,157 @@
+{
+  "id": "herdr",
+  "name": "Herdr",
+  "version": "1.0.0",
+  "description": "Use herdr, the terminal workspace manager for coding agents, from Termix with touch, mouse and a native navigator.",
+  "author": {
+    "name": "Diego Rodriguez"
+  },
+  "license": "Apache-2.0",
+  "repository": "https://github.com/jaygz316/termix-plugin-herdr",
+  "docs": "https://github.com/jaygz316/termix-plugin-herdr/tree/main/docs",
+  "category": "Terminal",
+  "icon": "Bot",
+  "features": [
+    "Attach to herdr on any SSH host in one tap",
+    "Touch becomes mouse: tap to click, long-press to right-click, hold and drag to select or resize, swipe to scroll",
+    "A key bar with herdr's prefix key, Esc, Tab, Ctrl, Alt and arrows",
+    "A navigator with every workspace, tab, pane and agent state",
+    "A tappable map of the current tab's panes",
+    "Prompt an agent or type into a pane from a normal text box, so phone keyboards and dictation work",
+    "Split, zoom, close and create without remembering keybindings"
+  ],
+  "engine": {
+    "termix": ">=26.10.3",
+    "api": "^1.11"
+  },
+  "capabilities": [
+    "hosts:read",
+    "credentials:use",
+    "ssh:connect",
+    "network:serve",
+    "ui:surface"
+  ],
+  "optionalDependencies": {
+    "ssh-terminal": "^1.1.0"
+  },
+  "contributes": {
+    "tabs": [
+      {
+        "id": "herdr",
+        "titleKey": "tab.title",
+        "icon": "Bot",
+        "openFrom": ["host-context-menu", "palette"]
+      }
+    ],
+    "permissions": [
+      {
+        "name": "use",
+        "titleKey": "permissions.use.title",
+        "descriptionKey": "permissions.use.description",
+        "defaultRoles": ["admin", "user"]
+      }
+    ],
+    "settings": {
+      "host": {
+        "enableKey": "enableHerdr",
+        "enableLabelKey": "settings.host.enable.label",
+        "enableDescriptionKey": "settings.host.enable.description",
+        "enableDefault": true,
+        "editorGroup": "ssh",
+        "fields": [
+          {
+            "key": "binaryPath",
+            "type": "string",
+            "labelKey": "settings.host.binaryPath.label",
+            "descriptionKey": "settings.host.binaryPath.description",
+            "placeholderKey": "settings.host.binaryPath.placeholder",
+            "default": "herdr",
+            "requires": "enableHerdr"
+          },
+          {
+            "key": "sessionName",
+            "type": "string",
+            "labelKey": "settings.host.sessionName.label",
+            "descriptionKey": "settings.host.sessionName.description",
+            "placeholderKey": "settings.host.sessionName.placeholder",
+            "default": "",
+            "requires": "enableHerdr"
+          }
+        ]
+      },
+      "user": [
+        {
+          "key": "touchMouse",
+          "type": "select",
+          "labelKey": "settings.user.touchMouse.label",
+          "descriptionKey": "settings.user.touchMouse.description",
+          "default": "auto",
+          "options": [
+            {
+              "value": "auto",
+              "labelKey": "settings.user.touchMouse.auto"
+            },
+            {
+              "value": "on",
+              "labelKey": "settings.user.touchMouse.on"
+            },
+            {
+              "value": "off",
+              "labelKey": "settings.user.touchMouse.off"
+            }
+          ]
+        },
+        {
+          "key": "longPressMs",
+          "type": "number",
+          "labelKey": "settings.user.longPressMs.label",
+          "descriptionKey": "settings.user.longPressMs.description",
+          "default": 450,
+          "min": 250,
+          "max": 1500
+        },
+        {
+          "key": "prefixKey",
+          "type": "select",
+          "labelKey": "settings.user.prefixKey.label",
+          "descriptionKey": "settings.user.prefixKey.description",
+          "default": "ctrl+b",
+          "options": [
+            { "value": "ctrl+b", "labelKey": "settings.user.prefixKey.ctrlB" },
+            { "value": "ctrl+a", "labelKey": "settings.user.prefixKey.ctrlA" },
+            {
+              "value": "ctrl+space",
+              "labelKey": "settings.user.prefixKey.ctrlSpace"
+            },
+            { "value": "ctrl+g", "labelKey": "settings.user.prefixKey.ctrlG" },
+            { "value": "f12", "labelKey": "settings.user.prefixKey.f12" }
+          ]
+        },
+        {
+          "key": "showKeyBar",
+          "type": "select",
+          "labelKey": "settings.user.showKeyBar.label",
+          "descriptionKey": "settings.user.showKeyBar.description",
+          "default": "auto",
+          "options": [
+            {
+              "value": "auto",
+              "labelKey": "settings.user.showKeyBar.auto"
+            },
+            {
+              "value": "always",
+              "labelKey": "settings.user.showKeyBar.always"
+            },
+            {
+              "value": "never",
+              "labelKey": "settings.user.showKeyBar.never"
+            }
+          ]
+        }
+      ]
+    },
+    "uses": ["terminal.view"]
+  },
+  "locales": "locales",
+  "platforms": ["linux", "win32", "darwin"]
+}

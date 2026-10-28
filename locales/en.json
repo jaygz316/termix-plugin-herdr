@@ -1,0 +1,172 @@
+{
+  "plugin": {
+    "name": "Herdr",
+    "description": "Use herdr, the terminal workspace manager for coding agents, from Termix with touch, mouse and a native navigator."
+  },
+  "tab": {
+    "title": "Herdr",
+    "open": "Open in Herdr",
+    "noHost": "Open Herdr from a host.",
+    "needsTerminal": "Herdr needs the SSH Terminal plugin",
+    "needsTerminalHint": "Turn on SSH Terminal in Plugins. Herdr runs inside its terminal so your host's login, keys and host key checks work as usual.",
+    "badSettings": "This host's herdr settings are not valid",
+    "badSettingsHint": "Edit the host and check the herdr path and session name under Herdr."
+  },
+  "toolbar": {
+    "touchOn": "Turn on touch as mouse",
+    "touchOff": "Turn off touch as mouse",
+    "keysOn": "Show the key bar",
+    "keysOff": "Hide the key bar",
+    "navigator": "Workspaces, tabs and agents",
+    "reattach": "Reconnect and attach again"
+  },
+  "status": {
+    "connecting": "Connecting",
+    "idle": "Idle",
+    "working": "Working",
+    "blocked": "Needs you",
+    "done": "Done",
+    "unknown": "Unknown"
+  },
+  "errors": {
+    "HERDR_NOT_INSTALLED": "herdr is not installed",
+    "HERDR_NOT_RUNNING": "herdr is not running",
+    "HOST_UNREACHABLE": "Can't reach the host",
+    "HERDR_ERROR": "herdr error"
+  },
+  "keys": {
+    "keyboard": "Show the keyboard",
+    "prefix": "Prefix",
+    "prefixHint": "Send herdr's prefix key, then type the action key",
+    "ctrl": "Ctrl",
+    "alt": "Alt",
+    "esc": "Esc",
+    "tab": "Tab",
+    "shiftTab": "Shift+Tab",
+    "up": "Up",
+    "down": "Down",
+    "left": "Left",
+    "right": "Right",
+    "enter": "Enter",
+    "ctrlC": "Ctrl+C",
+    "ctrlD": "Ctrl+D",
+    "pageUp": "Page Up",
+    "pageDown": "Page Down",
+    "pgUp": "PgUp",
+    "pgDn": "PgDn",
+    "home": "Home",
+    "end": "End",
+    "homeShort": "Home",
+    "endShort": "End",
+    "typeCtrl": "Ctrl +",
+    "typeAlt": "Alt +",
+    "typeCtrlAlt": "Ctrl+Alt +",
+    "modifiedKey": "Key to send with the modifier",
+    "cancel": "Cancel"
+  },
+  "actions": {
+    "workspaces": "Spaces",
+    "workspacesHint": "Open herdr's workspace picker (prefix, w)",
+    "goto": "Go to",
+    "gotoHint": "Open herdr's go to picker (prefix, g)",
+    "newTab": "New tab",
+    "previousTab": "Previous tab",
+    "nextTab": "Next tab",
+    "splitRight": "Split right",
+    "splitDown": "Split down",
+    "zoom": "Zoom pane",
+    "sidebarHint": "Show or hide herdr's sidebar (prefix, b)"
+  },
+  "navigator": {
+    "attention": "Agents waiting",
+    "workspaces": "Workspaces",
+    "newWorkspace": "New workspace",
+    "panes": "Panes",
+    "tabTitle": "Tab {{number}}: {{label}}",
+    "tabNumber": "Tab {{number}}",
+    "tabCount_one": "{{count}} tab",
+    "tabCount_other": "{{count}} tabs",
+    "paneCount_one": "{{count}} pane",
+    "paneCount_other": "{{count}} panes",
+    "focusPane": "Focus {{name}}",
+    "rename": "Rename",
+    "newName": "New name",
+    "save": "Save",
+    "cancel": "Cancel",
+    "close": "Close",
+    "closeWorkspace": "Close workspace",
+    "closeTab": "Close tab",
+    "closePane": "Close pane",
+    "confirm": {
+      "workspace": {
+        "close": "Close workspace {{name}}?"
+      },
+      "tab": {
+        "close": "Close tab {{name}}?"
+      },
+      "pane": {
+        "close": "Close pane {{name}}?"
+      },
+      "description": "Programs running in it are stopped."
+    },
+    "sendTo": "Send to {{name}}",
+    "promptPlaceholder": "Prompt for the agent",
+    "textPlaceholder": "Text or a command",
+    "prompt": "Prompt agent",
+    "run": "Run",
+    "type": "Type without Enter"
+  },
+  "permissions": {
+    "use": {
+      "title": "Use Herdr",
+      "description": "Open herdr on hosts the user can connect to, and control its workspaces, panes and agents."
+    }
+  },
+  "settings": {
+    "host": {
+      "enable": {
+        "label": "Herdr",
+        "description": "Offer the Herdr view for this host."
+      },
+      "binaryPath": {
+        "label": "herdr command",
+        "description": "The herdr binary on the host. A name on PATH or a full path; ~/ is your home folder.",
+        "placeholder": "herdr"
+      },
+      "sessionName": {
+        "label": "Session",
+        "description": "A named herdr session to use. Leave empty for the default session.",
+        "placeholder": "default"
+      }
+    },
+    "user": {
+      "touchMouse": {
+        "label": "Touch as mouse",
+        "description": "Turn taps, long presses, drags and swipes into mouse clicks, right clicks, drags and scrolling for herdr.",
+        "auto": "On touch screens",
+        "on": "Always",
+        "off": "Never"
+      },
+      "longPressMs": {
+        "label": "Long press time (ms)",
+        "description": "How long to hold before a touch becomes a right click, or the start of a drag."
+      },
+      "prefixKey": {
+        "label": "herdr prefix key",
+        "description": "Match the prefix in your herdr config.toml. The Prefix button and the picker buttons send it.",
+        "ctrlB": "Ctrl+B (herdr default)",
+        "ctrlA": "Ctrl+A",
+        "ctrlSpace": "Ctrl+Space",
+        "ctrlG": "Ctrl+G",
+        "f12": "F12"
+      },
+      "showKeyBar": {
+        "label": "Key bar",
+        "description": "Show a bar with Esc, Tab, Ctrl, Alt, arrows and herdr actions under the terminal.",
+        "auto": "On phones and touch screens",
+        "always": "Always",
+        "never": "Never"
+      }
+    }
+  }
+}
