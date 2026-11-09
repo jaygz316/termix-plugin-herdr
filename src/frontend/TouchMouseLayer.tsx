@@ -18,6 +18,14 @@ interface TouchMouseLayerProps {
 
 type Gesture =
   | { kind: "pending" }
+  | {
+      kind: "twoFingerPending";
+      secondPointerId: number;
+      secondStartX: number;
+      secondStartY: number;
+      firstReleased: boolean;
+      secondReleased: boolean;
+    }
   | { kind: "held" }
   | { kind: "scrolling"; lastY: number }
   | { kind: "dragging"; lastCell: Cell }
@@ -48,7 +56,7 @@ interface Marker {
  * the mouse reports a desktop terminal would send:
  *
  * - tap: left click (select a workspace, a tab, a pane, a button)
- * - long press and let go: right click (herdr's context menus)
+ * - two-finger tap or long press and let go: right click (herdr's context menus)
  * - long press then drag: left drag (select text, drag a split border)
  * - swipe: scroll wheel over the pane under the finger
  *
@@ -109,8 +117,22 @@ export function TouchMouseLayer({
   }
 
   function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
-    // A second finger cancels: no gesture here uses two.
     if (activeRef.current) {
+      const current = activeRef.current;
+      if (current.gesture.kind === "pending" && event.pointerType !== "mouse") {
+        event.preventDefault();
+        clearTimer();
+        layerRef.current?.setPointerCapture?.(event.pointerId);
+        current.gesture = {
+          kind: "twoFingerPending",
+          secondPointerId: event.pointerId,
+          secondStartX: event.clientX,
+          secondStartY: event.clientY,
+          firstReleased: false,
+          secondReleased: false,
+        };
+        return;
+      }
       cancel();
       return;
     }
@@ -159,7 +181,31 @@ export function TouchMouseLayer({
 
   function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
     const active = activeRef.current;
-    if (!active || active.pointerId !== event.pointerId) return;
+    if (!active) return;
+    if (active.gesture.kind === "twoFingerPending") {
+      const g = active.gesture;
+      if (event.pointerId === active.pointerId) {
+        if (
+          Math.hypot(
+            event.clientX - active.startX,
+            event.clientY - active.startY,
+          ) > SLOP
+        ) {
+          cancel();
+        }
+      } else if (event.pointerId === g.secondPointerId) {
+        if (
+          Math.hypot(
+            event.clientX - g.secondStartX,
+            event.clientY - g.secondStartY,
+          ) > SLOP
+        ) {
+          cancel();
+        }
+      }
+      return;
+    }
+    if (active.pointerId !== event.pointerId) return;
     event.preventDefault();
     const { gesture, grid } = active;
     const dx = event.clientX - active.startX;
@@ -223,7 +269,25 @@ export function TouchMouseLayer({
 
   function onPointerUp(event: React.PointerEvent<HTMLDivElement>) {
     const active = activeRef.current;
-    if (!active || active.pointerId !== event.pointerId) return;
+    if (!active) return;
+    if (active.gesture.kind === "twoFingerPending") {
+      const g = active.gesture;
+      if (event.pointerId === active.pointerId) {
+        g.firstReleased = true;
+      } else if (event.pointerId === g.secondPointerId) {
+        g.secondReleased = true;
+      } else {
+        return;
+      }
+      event.preventDefault();
+      if (g.firstReleased && g.secondReleased) {
+        send(sgrClick(MouseButton.right, active.startCell));
+        showMarker(active.grid, active.startCell, "tap");
+        finish();
+      }
+      return;
+    }
+    if (active.pointerId !== event.pointerId) return;
     event.preventDefault();
     const { gesture, grid, startCell } = active;
     switch (gesture.kind) {

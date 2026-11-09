@@ -9,6 +9,7 @@ import {
   normalizeBinary,
   normalizeSession,
   type HerdrErrorCode,
+  type HerdrSessionInfo,
   type HerdrSnapshot,
   type HerdrState,
 } from "../shared/herdr.js";
@@ -74,8 +75,12 @@ async function requireTarget(
   const binary = normalizeBinary(
     await ctx.settings.getHost<string>(hostId, HOST_SETTINGS.binary),
   );
+  const overrideSession =
+    req.query.session !== undefined ? req.query.session : req.body?.session;
   const session = normalizeSession(
-    await ctx.settings.getHost<string>(hostId, HOST_SETTINGS.session),
+    overrideSession !== undefined
+      ? overrideSession
+      : await ctx.settings.getHost<string>(hostId, HOST_SETTINGS.session),
   );
   if (binary === null || session === null) {
     res.status(400).json({
@@ -123,6 +128,54 @@ async function readSnapshot(
     );
   }
   return result.snapshot;
+}
+
+function parseSessionList(
+  raw: unknown,
+  activeSession: string,
+): HerdrSessionInfo[] {
+  const seen = new Map<string, HerdrSessionInfo>();
+  const add = (entry: unknown) => {
+    if (typeof entry === "string") {
+      const name = normalizeSession(entry) || "default";
+      if (!seen.has(name)) seen.set(name, { name });
+      return;
+    }
+    if (!entry || typeof entry !== "object") return;
+    const rec = entry as Record<string, unknown>;
+    const rawName =
+      typeof rec.name === "string"
+        ? rec.name
+        : typeof rec.session === "string"
+          ? rec.session
+          : "";
+    const normalized = normalizeSession(rawName);
+    if (normalized === null) return;
+    const name = normalized || "default";
+    seen.set(name, {
+      name,
+      ...(typeof rec.running === "boolean" ? { running: rec.running } : {}),
+      ...(typeof rec.attached === "number" ? { attached: rec.attached } : {}),
+    });
+  };
+
+  if (Array.isArray(raw)) {
+    for (const item of raw) add(item);
+  } else if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    if (Array.isArray(obj.sessions)) {
+      for (const item of obj.sessions) add(item);
+    } else if (typeof obj.output === "string") {
+      for (const line of obj.output.split("\n")) {
+        const token = line.trim().split(/\s+/)[0];
+        if (token) add(token);
+      }
+    }
+  }
+  const active = activeSession || "default";
+  if (!seen.has("default")) seen.set("default", { name: "default" });
+  if (!seen.has(active)) seen.set(active, { name: active });
+  return [...seen.values()];
 }
 
 /**
@@ -204,6 +257,10 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
    *         required: true
    *         schema:
    *           type: integer
+   *       - in: query
+   *         name: session
+   *         schema:
+   *           type: string
    *     responses:
    *       200:
    *         description: >-
@@ -234,13 +291,68 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
 
   /**
    * @openapi
+   * /plugin-api/herdr/hosts/{hostId}/sessions:
+   *   get:
+   *     summary: List herdr sessions on a host
+   *     tags:
+   *       - Herdr
+   *     parameters:
+   *       - in: path
+   *         name: hostId
+   *         required: true
+   *         schema:
+   *           type: integer
+   *       - in: query
+   *         name: session
+   *         schema:
+   *           type: string
+   *     responses:
+   *       200:
+   *         description: Available herdr sessions and the active session name
+   *       400:
+   *         description: Invalid host id or herdr host settings
+   *       403:
+   *         description: Herdr is turned off for this host
+   *       404:
+   *         description: The host does not exist or the user can't see it
+   *       409:
+   *         description: herdr is not installed on the host
+   *       422:
+   *         description: herdr refused the command
+   *       424:
+   *         description: The host could not be reached
+   */
+  router.get("/hosts/:hostId/sessions", async (req: Request, res: Response) => {
+    const target = await requireTarget(ctx, req, res);
+    if (!target) return;
+    try {
+      const raw = await withClient(ctx, target, async (client) =>
+        parseHerdrResult(
+          await runScript(
+            client,
+            buildScript(target.binary, "", ["session", "list", "--json"]),
+          ),
+        ),
+      );
+      res.json({
+        activeSession: target.session || "default",
+        sessions: parseSessionList(raw, target.session),
+      });
+    } catch (err) {
+      sendActionError(res, err);
+    }
+  });
+
+  /**
+   * @openapi
    * /plugin-api/herdr/hosts/{hostId}/actions:
    *   post:
    *     summary: Run one herdr command on a host
    *     description: >-
-   *       Focus, create, rename and close workspaces and tabs; focus, split,
-   *       zoom and close panes; send text or keys to a pane; prompt an agent.
-   *       Only the listed actions are accepted and every id is validated.
+   *       Focus, create, rename and close workspaces, worktrees and tabs; focus,
+   *       rename, split, resize, swap, zoom and close panes; send text or keys
+   *       to a pane; start or prompt an agent. Only the listed actions are
+   *       accepted and every id is validated.
    *     tags:
    *       - Herdr
    *     parameters:
@@ -265,20 +377,28 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
    *                   - workspace.create
    *                   - workspace.rename
    *                   - workspace.close
+   *                   - worktree.create
+   *                   - worktree.remove
    *                   - tab.focus
    *                   - tab.create
    *                   - tab.rename
    *                   - tab.close
    *                   - pane.focus
+   *                   - pane.rename
    *                   - pane.split
+   *                   - pane.resize
+   *                   - pane.swap
    *                   - pane.zoom
    *                   - pane.close
    *                   - pane.sendText
    *                   - pane.sendKeys
    *                   - pane.run
    *                   - agent.prompt
+   *                   - agent.start
    *               params:
    *                 type: object
+   *               session:
+   *                 type: string
    *     responses:
    *       200:
    *         description: herdr's result for the command
@@ -341,6 +461,10 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
    *           type: integer
    *           minimum: 1
    *           maximum: 1000
+   *       - in: query
+   *         name: session
+   *         schema:
+   *           type: string
    *     responses:
    *       200:
    *         description: The pane's recent output

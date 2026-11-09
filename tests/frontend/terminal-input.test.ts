@@ -82,6 +82,25 @@ describe("readTerminalGrid", () => {
       });
       // The probe is removed again.
       expect(root.querySelector(".xterm-rows")!.children).toHaveLength(3);
+
+      // Subsequent calls with the same dimensions reuse the cached cell width
+      // without re-inserting the DOM probe.
+      let probeCount = 0;
+      HTMLElement.prototype.getBoundingClientRect = function () {
+        if (this.textContent?.startsWith("WWW")) {
+          probeCount++;
+          return { width: this.textContent.length * 9 } as DOMRect;
+        }
+        return original.call(this);
+      };
+      expect(readTerminalGrid(root)?.cols).toBe(40);
+      expect(probeCount).toBe(0);
+
+      // Resizing the screen invalidates the cache and re-probes.
+      screen.getBoundingClientRect = () =>
+        ({ left: 0, top: 0, width: 450, height: 60 }) as DOMRect;
+      expect(readTerminalGrid(root)?.cols).toBe(50);
+      expect(probeCount).toBe(1);
     } finally {
       HTMLElement.prototype.getBoundingClientRect = original;
     }
@@ -130,18 +149,27 @@ describe("keys", () => {
     expect(keyBytes("up", NONE, false)).toBe("\x1b[A");
     expect(keyBytes("up", NONE, true)).toBe("\x1bOA");
     expect(keyBytes("left", { ...NONE, ctrl: true }, true)).toBe("\x1b[1;5D");
+    expect(keyBytes("right", { ...NONE, shift: true }, false)).toBe(
+      "\x1b[1;2C",
+    );
   });
 
   it("encodes the other keys", () => {
     expect(keyBytes("esc", NONE, false)).toBe("\x1b");
     expect(keyBytes("tab", NONE, false)).toBe("\t");
+    expect(keyBytes("tab", { ...NONE, shift: true }, false)).toBe("\x1b[Z");
     expect(keyBytes("shiftTab", NONE, false)).toBe("\x1b[Z");
+    expect(keyBytes("backspace", NONE, false)).toBe("\x7f");
+    expect(keyBytes("slash", NONE, false)).toBe("/");
     expect(keyBytes("enter", { ...NONE, alt: true }, false)).toBe("\x1b\r");
     expect(keyBytes("ctrlC", NONE, false)).toBe("\x03");
+    expect(keyBytes("ctrlZ", NONE, false)).toBe("\x1a");
+    expect(keyBytes("ctrlL", NONE, false)).toBe("\x0c");
     expect(keyBytes("pageUp", NONE, false)).toBe("\x1b[5~");
   });
 
-  it("applies Ctrl and Alt to a typed character", () => {
+  it("applies Shift, Ctrl and Alt to a typed character", () => {
+    expect(charBytes("a", { ...NONE, shift: true })).toBe("A");
     expect(charBytes("c", { ...NONE, ctrl: true })).toBe("\x03");
     expect(charBytes("R", { ...NONE, ctrl: true })).toBe("\x12");
     expect(charBytes("x", { ...NONE, alt: true })).toBe("\x1bx");

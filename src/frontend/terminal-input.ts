@@ -60,12 +60,22 @@ export function cellAt(grid: TerminalGrid, x: number, y: number): Cell {
 
 const MEASURE_CHARS = 50;
 
+interface CachedCellWidth {
+  rows: number;
+  width: number;
+  height: number;
+  charWidth: number;
+}
+
+const cellWidthCache = new WeakMap<Element, CachedCellWidth>();
+
 /**
  * Reads the grid of the xterm.js terminal inside `root`. The terminal plugin
  * uses xterm's DOM renderer: `.xterm-rows` has one element per row and the
  * screen is exactly cols × cell width wide. The cell width is measured with a
  * run of "W" inside the row container, which carries the terminal's font and
- * the letter spacing xterm uses to make each glyph one cell wide.
+ * the letter spacing xterm uses to make each glyph one cell wide, and is
+ * cached until the screen size or row count changes.
  */
 export function readTerminalGrid(root: ParentNode): TerminalGrid | null {
   const screen = root.querySelector<HTMLElement>(".xterm-screen");
@@ -75,18 +85,35 @@ export function readTerminalGrid(root: ParentNode): TerminalGrid | null {
   const box = screen.getBoundingClientRect();
   if (rows < 1 || box.width <= 0 || box.height <= 0) return null;
 
-  const probe = document.createElement("span");
-  probe.textContent = "W".repeat(MEASURE_CHARS);
-  probe.setAttribute("aria-hidden", "true");
-  probe.style.position = "absolute";
-  probe.style.visibility = "hidden";
-  probe.style.whiteSpace = "pre";
-  probe.style.left = "0";
-  probe.style.top = "0";
-  rowContainer.appendChild(probe);
-  const charWidth = probe.getBoundingClientRect().width / MEASURE_CHARS;
-  probe.remove();
-  if (!(charWidth > 0)) return null;
+  const cached = cellWidthCache.get(rowContainer);
+  let charWidth =
+    cached &&
+    cached.rows === rows &&
+    cached.width === box.width &&
+    cached.height === box.height
+      ? cached.charWidth
+      : 0;
+
+  if (!(charWidth > 0)) {
+    const probe = document.createElement("span");
+    probe.textContent = "W".repeat(MEASURE_CHARS);
+    probe.setAttribute("aria-hidden", "true");
+    probe.style.position = "absolute";
+    probe.style.visibility = "hidden";
+    probe.style.whiteSpace = "pre";
+    probe.style.left = "0";
+    probe.style.top = "0";
+    rowContainer.appendChild(probe);
+    charWidth = probe.getBoundingClientRect().width / MEASURE_CHARS;
+    probe.remove();
+    if (!(charWidth > 0)) return null;
+    cellWidthCache.set(rowContainer, {
+      rows,
+      width: box.width,
+      height: box.height,
+      charWidth,
+    });
+  }
 
   const cols = Math.max(1, Math.round(box.width / charWidth));
   return {
@@ -164,6 +191,8 @@ export type BarKey =
   | "tab"
   | "shiftTab"
   | "enter"
+  | "backspace"
+  | "slash"
   | "up"
   | "down"
   | "left"
@@ -174,7 +203,8 @@ export type BarKey =
   | "pageDown"
   | "ctrlC"
   | "ctrlD"
-  | "ctrlZ";
+  | "ctrlZ"
+  | "ctrlL";
 
 export interface Modifiers {
   ctrl: boolean;
@@ -218,6 +248,10 @@ export function keyBytes(
       return "\x1b[Z";
     case "enter":
       return alt + "\r";
+    case "backspace":
+      return alt + "\x7f";
+    case "slash":
+      return alt + "/";
     case "pageUp":
       return param > 1 ? `\x1b[5;${param}~` : "\x1b[5~";
     case "pageDown":
@@ -228,14 +262,16 @@ export function keyBytes(
       return alt + "\x04";
     case "ctrlZ":
       return alt + "\x1a";
+    case "ctrlL":
+      return alt + "\x0c";
     default:
       return "";
   }
 }
 
-/** A typed character with the sticky Ctrl and Alt applied. */
+/** A typed character with the sticky Ctrl, Alt and Shift applied. */
 export function charBytes(char: string, mods: Modifiers): string {
-  let out = char;
+  let out = mods.shift && !mods.ctrl ? char.toUpperCase() : char;
   if (mods.ctrl && char.length === 1) {
     const code = char.toLowerCase().charCodeAt(0);
     if (code >= 97 && code <= 122) out = String.fromCharCode(code - 96);

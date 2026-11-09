@@ -39,4 +39,15 @@ export function activate(app: TermixApp): void {
     when: canUse,
     run: (host, shell) => shell.openTab(host, TAB_ID),
   });
+
+  app.registerPaletteEntry({
+    id: TAB_ID,
+    titleKey: "tab.open",
+    icon: Bot,
+    scope: "host",
+    when: canUse,
+    run: (shell, host) => {
+      if (host) shell.openTab(host, TAB_ID);
+    },
+  });
 }

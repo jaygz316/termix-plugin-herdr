@@ -53,18 +53,26 @@ aren't obvious from the code, and anything that has bitten you before.
   `executeCommand` set to `herdr [--session X]`, so host keys, TOTP, jump hosts and themes all work. Its
   handle gives `sendInput` and `subscribeOutput`; nothing else of xterm is exposed.
 - Touch as mouse (`TouchMouseLayer`) sits over the terminal and writes SGR (1006) mouse reports with
-  `sendInput`. It only shows while `MouseModeTracker` has seen herdr turn on modes 1000/1002/1003 in the
-  output, so a plain shell never gets mouse bytes. Cell geometry comes from xterm 6's DOM renderer
-  (`readTerminalGrid`): one `.xterm-rows` child per row, and the cell width measured with a run of "W"
-  inside `.xterm-rows`. If SSH Terminal ever switches to the WebGL renderer, this has to change.
-- The backend never builds shell strings from input. `actions.ts` whitelists actions into argv,
-  `remote.ts` quotes every argument and sends a POSIX script on stdin to `sh -s`, so the login shell
-  (fish included) never parses it. The script adds `~/.local/bin` and friends to PATH, because
-  non-interactive SSH skips profiles and herdr installs to `~/.local/bin`.
+  `sendInput` (including two-finger tap as immediate right-click). It only shows while `MouseModeTracker`
+  has seen herdr turn on modes 1000/1002/1003 in the output, so a plain shell never gets mouse bytes. Cell
+  geometry comes from xterm 6's DOM renderer (`readTerminalGrid`): one `.xterm-rows` child per row, and the
+  cell width measured with a run of "W" inside `.xterm-rows` and cached in a `WeakMap` until the row count
+  or `.xterm-screen` dimensions change. If SSH Terminal ever switches to the WebGL renderer, this has to change.
+- The backend never builds shell strings from input. `actions.ts` whitelists actions into argv (workspaces,
+  git worktrees, tabs, panes and agents), `remote.ts` quotes every argument and sends a POSIX script on stdin
+  to `sh -s`, so the login shell (fish included) never parses it. The script adds `~/.local/bin` and friends
+  to PATH, because non-interactive SSH skips profiles and herdr installs to `~/.local/bin`.
 - herdr's CLI cannot focus a pane by id; the socket API can (`pane.focus`). `buildSocketScript` sends one
   JSON line to the socket through `python3`, and the route falls back to `agent focus` or `tab focus`.
-- herdr prints JSON for most commands but nothing for `send-text`, `send-keys` and `run`, and plain text
-  for `pane read`. `parseHerdrResult` treats empty success output as `{}`.
+- When an agent is `blocked` (waiting for tool permission or an interactive question), herdr's CLI refuses
+  `agent prompt` with `agent_blocked`. The navigator surfaces one-tap approval keys (`pane.sendKeys`) and
+  highlights `Run` (`pane.run`) alongside a live `pane read` output preview so the user can see and answer
+  the prompt without zooming the terminal.
+- Closing a workspace that has open linked git worktree workspaces fails with
+  `workspace_group_close_required`; `HerdrTab` catches that code, asks for confirmation and retries with
+  `workspace.close` (`group: true`, which passes `--group`).
+- herdr prints JSON for most commands (`session list --json` requires `--json`), nothing for `send-text`,
+  `send-keys` and `run`, and plain text for `pane read`. `parseHerdrResult` treats empty success output as `{}`.
 - Every failure is a 4xx or `{ available: false }`, never a 5xx: an unreachable host on a phone polling
   every few seconds would otherwise use up the plugin's error budget and get it turned off.
 - The Termix mobile app does not load third-party plugins; this plugin is for the web UI, including a

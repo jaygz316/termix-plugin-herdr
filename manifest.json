@@ -1,7 +1,7 @@
 {
   "id": "herdr",
   "name": "Herdr",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Use herdr, the terminal workspace manager for coding agents, from Termix with touch, mouse and a native navigator.",
   "author": {
     "name": "Diego Rodriguez"
@@ -12,13 +12,13 @@
   "category": "Terminal",
   "icon": "Bot",
   "features": [
-    "Attach to herdr on any SSH host in one tap",
-    "Touch becomes mouse: tap to click, long-press to right-click, hold and drag to select or resize, swipe to scroll",
-    "A key bar with herdr's prefix key, Esc, Tab, Ctrl, Alt and arrows",
-    "A navigator with every workspace, tab, pane and agent state",
-    "A tappable map of the current tab's panes",
-    "Prompt an agent or type into a pane from a normal text box, so phone keyboards and dictation work",
-    "Split, zoom, close and create without remembering keybindings"
+    "Attach to herdr on any SSH host in one tap or from the command palette, and switch between named herdr sessions",
+    "Touch becomes mouse: tap to click, two-finger tap or long-press to right-click, hold and drag to select or resize, swipe to scroll",
+    "A key bar with herdr's prefix key, Esc, Tab, Shift, Ctrl, Alt, Backspace, arrows and quick control keys",
+    "A navigator with every workspace, git worktree, tab, pane and agent state, plus live pane output preview and copy",
+    "One-tap approval keys when an agent is waiting for input, and toast notifications when agents finish or need you",
+    "Prompt an agent, launch a new agent or type into a pane from a normal text box, so phone keyboards and dictation work",
+    "Split, resize, swap, rename, zoom, close and create workspaces or git worktrees without remembering keybindings"
   ],
   "engine": {
     "termix": ">=26.10.3",
@@ -145,6 +145,27 @@
             {
               "value": "never",
               "labelKey": "settings.user.showKeyBar.never"
+            }
+          ]
+        },
+        {
+          "key": "agentNotifications",
+          "type": "select",
+          "labelKey": "settings.user.agentNotifications.label",
+          "descriptionKey": "settings.user.agentNotifications.description",
+          "default": "all",
+          "options": [
+            {
+              "value": "all",
+              "labelKey": "settings.user.agentNotifications.all"
+            },
+            {
+              "value": "blocked",
+              "labelKey": "settings.user.agentNotifications.blocked"
+            },
+            {
+              "value": "off",
+              "labelKey": "settings.user.agentNotifications.off"
             }
           ]
         }

@@ -54,6 +54,35 @@ export function launchCommand(binary: string, session: string): string {
   return session ? `${binary} --session ${session}` : binary;
 }
 
+export const SUPPORTED_AGENT_KINDS = [
+  "claude",
+  "codex",
+  "gemini",
+  "opencode",
+  "copilot",
+  "cursor",
+  "pi",
+  "amp",
+  "droid",
+  "devin",
+  "kimi",
+  "kilo",
+  "qwen",
+  "grok",
+  "agy",
+  "cline",
+  "omp",
+  "mastracode",
+  "kiro",
+  "hermes",
+  "qodercli",
+  "letta",
+  "maki",
+  "muse",
+] as const;
+
+export type AgentKind = (typeof SUPPORTED_AGENT_KINDS)[number];
+
 export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
 
 export interface HerdrRect {
@@ -72,6 +101,11 @@ export interface HerdrWorkspace {
   agent_status: AgentStatus;
   pane_count: number;
   tab_count: number;
+  worktree?: {
+    branch?: string;
+    path?: string;
+    primary_workspace_id?: string;
+  } | null;
 }
 
 export interface HerdrTab {
@@ -117,6 +151,12 @@ export interface HerdrSnapshot {
   panes: HerdrPane[];
   layouts: HerdrLayout[];
   agents: HerdrPane[];
+}
+
+export interface HerdrSessionInfo {
+  name: string;
+  running?: boolean;
+  attached?: number;
 }
 
 /** Why herdr could not be reached, for the UI to explain. */

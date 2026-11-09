@@ -231,13 +231,30 @@ describe("herdr activate", () => {
     );
   });
 
-  it("lists workspaces and agents waiting in the navigator", async () => {
+  it("lists workspaces, previews pane output, and drives agents and worktrees in the navigator", async () => {
     const terminal = fakeTerminal();
     const post = vi.fn(async () => ({ data: { result: {} } }));
+    const get = vi.fn(async (url: string) => {
+      if (url.includes("/panes/")) {
+        return { data: { text: "Allow bash tool? [y/n]" } };
+      }
+      if (url.includes("/sessions")) {
+        return {
+          data: {
+            activeSession: "default",
+            sessions: [
+              { name: "default", workspace_count: 1, pane_count: 1 },
+              { name: "ops", workspace_count: 2, pane_count: 3 },
+            ],
+          },
+        };
+      }
+      return { data: { available: true, snapshot } };
+    });
     rendered = await renderWithApp(plugin, {
       manifest,
       locales,
-      api: api(post),
+      api: { get, post, put: vi.fn(), delete: vi.fn() } as never,
     });
     rendered.app.registerComponent(
       "terminal.view",
@@ -252,6 +269,36 @@ describe("herdr activate", () => {
     expect(await screen.findByText(locales.navigator.attention)).toBeTruthy();
     expect(screen.getByText("1. api")).toBeTruthy();
     expect(screen.getByTestId("herdr-pane-map")).toBeTruthy();
+
+    // Live output preview shows the focused pane's text.
+    await waitFor(() =>
+      expect(screen.getByTestId("herdr-pane-output").textContent).toContain(
+        "Allow bash tool? [y/n]",
+      ),
+    );
+
+    // One-tap approval key sends pane.sendKeys to the blocked agent.
+    fireEvent.click(screen.getByLabelText("Send y to claude"));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/hosts/7/actions", {
+        action: "pane.sendKeys",
+        params: { paneId: "w1:p1", keys: ["y", "enter"] },
+      }),
+    );
+
+    // Creating a git worktree sends worktree.create.
+    fireEvent.click(screen.getByLabelText(locales.navigator.newWorktree));
+    fireEvent.change(
+      screen.getByPlaceholderText(locales.navigator.worktreeBranchPlaceholder),
+      { target: { value: "feat/auth" } },
+    );
+    fireEvent.click(screen.getByText(locales.navigator.createWorktree));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/hosts/7/actions", {
+        action: "worktree.create",
+        params: { workspaceId: "w1", branch: "feat/auth" },
+      }),
+    );
 
     fireEvent.change(
       screen.getByPlaceholderText(locales.navigator.promptPlaceholder),

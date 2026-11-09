@@ -34,15 +34,22 @@
     "HOST_UNREACHABLE": "Can't reach the host",
     "HERDR_ERROR": "herdr error"
   },
+  "notifications": {
+    "agentBlocked": "{{name}} needs your input ({{workspace}})",
+    "agentDone": "{{name}} finished ({{workspace}})"
+  },
   "keys": {
     "keyboard": "Show the keyboard",
     "prefix": "Prefix",
     "prefixHint": "Send herdr's prefix key, then type the action key",
     "ctrl": "Ctrl",
     "alt": "Alt",
+    "shift": "Shift",
     "esc": "Esc",
     "tab": "Tab",
     "shiftTab": "Shift+Tab",
+    "backspace": "Backspace",
+    "slash": "Slash (/)",
     "up": "Up",
     "down": "Down",
     "left": "Left",
@@ -50,6 +57,8 @@
     "enter": "Enter",
     "ctrlC": "Ctrl+C",
     "ctrlD": "Ctrl+D",
+    "ctrlZ": "Ctrl+Z",
+    "ctrlL": "Ctrl+L",
     "pageUp": "Page Up",
     "pageDown": "Page Down",
     "pgUp": "PgUp",
@@ -78,10 +87,46 @@
     "sidebarHint": "Show or hide herdr's sidebar (prefix, b)"
   },
   "navigator": {
+    "session": "Session",
+    "sessionName": "Session name",
+    "switchSession": "Switch",
+    "showTerminal": "Show terminal",
     "attention": "Agents waiting",
+    "sendKey": "Send {{key}} to {{name}}",
     "workspaces": "Workspaces",
     "newWorkspace": "New workspace",
+    "newWorkspaceWithOptions": "New workspace with directory",
+    "workspaceLabel": "Workspace name (optional)",
+    "workspaceLabelPlaceholder": "api-refactor",
+    "workspaceCwd": "Working directory (optional)",
+    "workspaceCwdPlaceholder": "~/projects/app",
+    "create": "Create",
+    "newWorktree": "New git worktree",
+    "removeWorktree": "Remove git worktree",
+    "worktreeBranch": "Branch name",
+    "worktreeBranchPlaceholder": "feat/auth",
+    "createWorktree": "Create worktree",
     "panes": "Panes",
+    "renamePane": "Rename pane",
+    "clearName": "Clear",
+    "swapPane": "Swap pane",
+    "resizePane": "Resize pane",
+    "resize": {
+      "left": "Resize pane left",
+      "down": "Resize pane down",
+      "up": "Resize pane up",
+      "right": "Resize pane right"
+    },
+    "launchAgent": "Launch {{agent}}",
+    "outputPreview": "Output: {{name}}",
+    "copyOutput": "Copy output",
+    "refreshOutput": "Refresh output",
+    "hideOutput": "Hide output preview",
+    "showOutput": "Show output preview",
+    "emptyOutput": "No output in this pane yet.",
+    "outputCopied": "Pane output copied",
+    "outputCopyFailed": "Could not copy pane output",
+    "blockedHint": "This agent is waiting for interactive approval. Tap a key below or use Run.",
     "tabTitle": "Tab {{number}}: {{label}}",
     "tabNumber": "Tab {{number}}",
     "tabCount_one": "{{count}} tab",
@@ -100,6 +145,10 @@
     "confirm": {
       "workspace": {
         "close": "Close workspace {{name}}?"
+      },
+      "workspaceGroupClose": "Close workspace {{name}} and all linked worktree workspaces?",
+      "worktree": {
+        "remove": "Remove git worktree {{name}}?"
       },
       "tab": {
         "close": "Close tab {{name}}?"
@@ -166,6 +215,13 @@
         "auto": "On phones and touch screens",
         "always": "Always",
         "never": "Never"
+      },
+      "agentNotifications": {
+        "label": "Agent notifications",
+        "description": "Show a toast when an agent needs your input or finishes a task.",
+        "all": "When waiting or done",
+        "blocked": "Only when waiting for input",
+        "off": "Off"
       }
     }
   }

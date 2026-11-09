@@ -25,16 +25,28 @@ export function herdrEnabled(
   return settingsOf(host)[HOST_SETTINGS.enabled] !== false;
 }
 
+/** The configured session name for this host ("" for default), or null when invalid. */
+export function herdrSessionName(
+  host: PluginHostRecord | null | undefined,
+): string | null {
+  return normalizeSession(settingsOf(host)[HOST_SETTINGS.session]);
+}
+
 /**
  * What to type into the host's shell to attach herdr, or null when the
  * host's herdr path or session name is not usable.
  */
 export function herdrLaunchCommand(
   host: PluginHostRecord | null | undefined,
+  sessionOverride?: string,
 ): string | null {
   const settings = settingsOf(host);
   const binary = normalizeBinary(settings[HOST_SETTINGS.binary]);
-  const session = normalizeSession(settings[HOST_SETTINGS.session]);
+  const session = normalizeSession(
+    sessionOverride !== undefined
+      ? sessionOverride
+      : settings[HOST_SETTINGS.session],
+  );
   if (binary === null || session === null) return null;
   return launchCommand(binary, session);
 }

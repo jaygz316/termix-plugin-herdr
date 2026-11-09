@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { useTranslation } from "@termix-ssh/plugin-sdk/frontend";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useToast, useTranslation } from "@termix-ssh/plugin-sdk/frontend";
 import {
   Button,
   GroupHeading,
@@ -11,19 +11,34 @@ import {
   useConfirm,
 } from "@termix-ssh/plugin-sdk/ui";
 import {
+  ArrowDown,
+  ArrowLeft,
+  ArrowLeftRight,
+  ArrowRight,
+  ArrowUp,
   Bot,
   Check,
+  ChevronDown,
+  ChevronRight,
+  Copy,
+  FolderPlus,
+  GitBranch,
   Maximize2,
   Pencil,
   Plus,
+  RotateCw,
   SquareSplitHorizontal,
   SquareSplitVertical,
+  TerminalSquare,
+  Trash2,
   X,
 } from "lucide-react";
 import type {
+  AgentKind,
   AgentStatus,
   HerdrLayout,
   HerdrPane,
+  HerdrSessionInfo,
   HerdrSnapshot,
 } from "../shared/herdr";
 import type { ActionName } from "./api";
@@ -36,7 +51,35 @@ export type RunAction = (
 interface NavigatorProps {
   snapshot: HerdrSnapshot;
   run: RunAction;
+  readPane?: (paneId: string, lines?: number) => Promise<string>;
+  sessions?: HerdrSessionInfo[];
+  activeSession?: string;
+  onSelectSession?: (session: string) => void;
+  onCloseNavigator?: () => void;
 }
+
+const QUICK_AGENT_KINDS: AgentKind[] = [
+  "claude",
+  "codex",
+  "gemini",
+  "opencode",
+  "copilot",
+  "cursor",
+  "pi",
+];
+
+const APPROVAL_KEYS: Array<{ label: string; keys: string[] }> = [
+  { label: "Enter", keys: ["enter"] },
+  { label: "y", keys: ["y", "enter"] },
+  { label: "n", keys: ["n", "enter"] },
+  { label: "Esc", keys: ["esc"] },
+  { label: "1", keys: ["1"] },
+  { label: "2", keys: ["2"] },
+  { label: "3", keys: ["3"] },
+  { label: "↑", keys: ["up"] },
+  { label: "↓", keys: ["down"] },
+  { label: "^C", keys: ["ctrl+c"] },
+];
 
 const STATUS_TONE: Record<
   AgentStatus,
@@ -71,10 +114,12 @@ function RenameField({
   initial,
   onSave,
   onCancel,
+  onClear,
 }: {
   initial: string;
   onSave: (value: string) => void;
   onCancel: () => void;
+  onClear?: () => void;
 }) {
   const { t } = useTranslation();
   const [value, setValue] = useState(initial);
@@ -98,6 +143,15 @@ function RenameField({
       <ListRowAction label={t("navigator.save")} type="submit">
         <Check className="size-3.5" />
       </ListRowAction>
+      {onClear && (
+        <ListRowAction
+          label={t("navigator.clearName")}
+          type="button"
+          onClick={onClear}
+        >
+          <Trash2 className="size-3.5" />
+        </ListRowAction>
+      )}
       <ListRowAction
         label={t("navigator.cancel")}
         type="button"
@@ -114,10 +168,12 @@ function PaneMap({
   layout,
   panes,
   run,
+  onCloseNavigator,
 }: {
   layout: HerdrLayout;
   panes: Map<string, HerdrPane>;
   run: RunAction;
+  onCloseNavigator?: () => void;
 }) {
   const { t } = useTranslation();
   const { area } = layout;
@@ -137,7 +193,13 @@ function PaneMap({
           <button
             key={pane_id}
             type="button"
-            onClick={() => void run("pane.focus", { paneId: pane_id })}
+            onClick={() => {
+              if (focused && onCloseNavigator) {
+                onCloseNavigator();
+                return;
+              }
+              void run("pane.focus", { paneId: pane_id });
+            }}
             className={cn(
               "absolute flex flex-col items-start justify-start gap-0.5 overflow-hidden border p-1 text-left text-[11px]",
               focused
@@ -183,15 +245,44 @@ function Section({
 }
 
 /**
- * Everything in herdr as plain lists: workspaces, tabs, a map of the current
- * tab's panes, agents waiting on you, and a text box that types into a pane
- * through herdr's API, where phone keyboards and dictation behave.
+ * Everything in herdr as plain lists: workspaces, worktrees, tabs, a map of
+ * the current tab's panes, agents waiting on you, a live pane output preview,
+ * and a text box that types into a pane through herdr's API, where phone
+ * keyboards and dictation behave.
  */
-export function Navigator({ snapshot, run }: NavigatorProps) {
+export function Navigator({
+  snapshot,
+  run,
+  readPane,
+  sessions,
+  activeSession,
+  onSelectSession,
+  onCloseNavigator,
+}: NavigatorProps) {
   const { t } = useTranslation();
+  const toast = useToast();
   const confirm = useConfirm();
   const [renaming, setRenaming] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+
+  // Workspace creation with optional label + cwd
+  const [creatingWorkspace, setCreatingWorkspace] = useState(false);
+  const [wsLabel, setWsLabel] = useState("");
+  const [wsCwd, setWsCwd] = useState("");
+
+  // Git worktree creation for a workspace
+  const [worktreeForWs, setWorktreeForWs] = useState<string | null>(null);
+  const [wtBranch, setWtBranch] = useState("");
+  const [wtLabel, setWtLabel] = useState("");
+
+  // Custom session input
+  const [editingSession, setEditingSession] = useState(false);
+  const [sessionInput, setSessionInput] = useState("");
+
+  // Collapsible live output preview for focused pane
+  const [outputOpen, setOutputOpen] = useState(true);
+  const [outputText, setOutputText] = useState<string>("");
+  const [outputLoading, setOutputLoading] = useState(false);
 
   const panes = new Map(snapshot.panes.map((pane) => [pane.pane_id, pane]));
   const focusedPane = snapshot.focused_pane_id
@@ -211,8 +302,42 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
     (a, b) => a.number - b.number,
   );
 
+  const refreshOutput = useCallback(async () => {
+    if (!readPane || !focusedPane) return;
+    setOutputLoading(true);
+    try {
+      const text = await readPane(focusedPane.pane_id, 80);
+      setOutputText(text);
+    } catch {
+      // Keep the previous output if a background read fails.
+    } finally {
+      setOutputLoading(false);
+    }
+  }, [readPane, focusedPane]);
+
+  useEffect(() => {
+    if (!readPane || !focusedPane || !outputOpen) return;
+    void refreshOutput();
+  }, [
+    readPane,
+    focusedPane?.pane_id,
+    focusedPane?.agent_status,
+    outputOpen,
+    refreshOutput,
+  ]);
+
+  async function copyOutput() {
+    if (!outputText) return;
+    try {
+      await navigator.clipboard?.writeText(outputText);
+      toast.success(t("navigator.outputCopied"));
+    } catch {
+      toast.error(t("navigator.outputCopyFailed"));
+    }
+  }
+
   async function closeWithConfirm(
-    action: "workspace.close" | "tab.close" | "pane.close",
+    action: "workspace.close" | "tab.close" | "pane.close" | "worktree.remove",
     params: Record<string, unknown>,
     name: string,
   ) {
@@ -242,23 +367,154 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
               paneId: focusedPane.pane_id,
               text: draft,
             });
-    if (ok) setDraft("");
+    if (ok) {
+      setDraft("");
+      void refreshOutput();
+    }
   }
+
+  async function sendQuickKeys(paneId: string, keys: string[]) {
+    const ok = await run("pane.sendKeys", { paneId, keys });
+    if (ok) void refreshOutput();
+  }
+
+  const nextSwapPaneId =
+    layout && layout.panes.length > 1 && focusedPane
+      ? layout.panes[
+          (layout.panes.findIndex((p) => p.pane_id === focusedPane.pane_id) +
+            1) %
+            layout.panes.length
+        ]?.pane_id
+      : undefined;
+
+  const isFocusedBlocked = focusedPane?.agent_status === "blocked";
 
   return (
     <div className="flex flex-col gap-4 p-2.5" data-testid="herdr-navigator">
+      {(onSelectSession || onCloseNavigator) && (
+        <div className="flex flex-wrap items-center justify-between gap-1 border-b border-border pb-2">
+          {onSelectSession && (
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
+              <span className="text-xs text-muted-foreground">
+                {t("navigator.session")}:
+              </span>
+              {(sessions && sessions.length > 0
+                ? sessions
+                : [{ name: activeSession || "default" }]
+              ).map((entry) => {
+                const isCurrent =
+                  (activeSession || "default") === (entry.name || "default");
+                return (
+                  <button
+                    key={entry.name}
+                    type="button"
+                    onClick={() =>
+                      onSelectSession(
+                        entry.name === "default" ? "" : entry.name,
+                      )
+                    }
+                    className={cn(
+                      "h-6 border px-1.5 text-xs",
+                      isCurrent
+                        ? "border-accent-brand text-accent-brand"
+                        : "border-border text-foreground active:bg-muted",
+                    )}
+                  >
+                    {entry.name}
+                  </button>
+                );
+              })}
+              {editingSession ? (
+                <form
+                  className="flex items-center gap-1"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const trimmed = sessionInput.trim();
+                    setEditingSession(false);
+                    setSessionInput("");
+                    onSelectSession(trimmed === "default" ? "" : trimmed);
+                  }}
+                >
+                  <input
+                    autoFocus
+                    aria-label={t("navigator.sessionName")}
+                    placeholder="default"
+                    className="h-6 w-24 border border-border bg-transparent px-1.5 text-xs"
+                    value={sessionInput}
+                    maxLength={64}
+                    onChange={(event) => setSessionInput(event.target.value)}
+                    onKeyDown={(event) =>
+                      event.key === "Escape" && setEditingSession(false)
+                    }
+                  />
+                  <ListRowAction label={t("navigator.save")} type="submit">
+                    <Check className="size-3" />
+                  </ListRowAction>
+                </form>
+              ) : (
+                <ListRowAction
+                  label={t("navigator.switchSession")}
+                  onClick={() => {
+                    setSessionInput(activeSession || "");
+                    setEditingSession(true);
+                  }}
+                >
+                  <Pencil className="size-3" />
+                </ListRowAction>
+              )}
+            </div>
+          )}
+          {onCloseNavigator && (
+            <Button size="sm" variant="outline" onClick={onCloseNavigator}>
+              <TerminalSquare className="mr-1 size-3.5" />
+              {t("navigator.showTerminal")}
+            </Button>
+          )}
+        </div>
+      )}
+
       {attention.length > 0 && (
         <Section title={t("navigator.attention")}>
           {attention.map((agent) => (
-            <ListRow
-              key={agent.pane_id}
-              icon={<Bot className="size-4" />}
-              title={paneName(agent, agent.pane_id)}
-              meta={workspaceLabel.get(agent.workspace_id)}
-              tone={agent.agent_status === "blocked" ? "warning" : "success"}
-              badges={<StatusBadge status={agent.agent_status} />}
-              onClick={() => void run("pane.focus", { paneId: agent.pane_id })}
-            />
+            <div key={agent.pane_id} className="flex flex-col gap-1">
+              <ListRow
+                icon={<Bot className="size-4" />}
+                title={paneName(agent, agent.pane_id)}
+                meta={workspaceLabel.get(agent.workspace_id)}
+                tone={agent.agent_status === "blocked" ? "warning" : "success"}
+                badges={<StatusBadge status={agent.agent_status} />}
+                onClick={() => {
+                  if (agent.focused && onCloseNavigator) {
+                    onCloseNavigator();
+                    return;
+                  }
+                  void run("pane.focus", { paneId: agent.pane_id });
+                }}
+              />
+              {agent.agent_status === "blocked" && (
+                <div
+                  className="flex flex-wrap items-center gap-1 pl-6"
+                  data-testid={`herdr-quick-keys-${agent.pane_id}`}
+                >
+                  {APPROVAL_KEYS.slice(0, 6).map((item) => (
+                    <button
+                      key={item.label}
+                      type="button"
+                      aria-label={t("navigator.sendKey", {
+                        key: item.label,
+                        name: paneName(agent, agent.pane_id),
+                      })}
+                      onClick={() =>
+                        void sendQuickKeys(agent.pane_id, item.keys)
+                      }
+                      className="h-6 border border-border bg-background px-1.5 text-[11px] active:bg-muted"
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
         </Section>
       )}
@@ -266,18 +522,77 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
       <Section
         title={t("navigator.workspaces")}
         action={
-          <ListRowAction
-            label={t("navigator.newWorkspace")}
-            onClick={() => void run("workspace.create")}
-          >
-            <Plus className="size-3.5" />
-          </ListRowAction>
+          <div className="flex gap-1">
+            <ListRowAction
+              label={t("navigator.newWorkspaceWithOptions")}
+              onClick={() => setCreatingWorkspace((open) => !open)}
+            >
+              <FolderPlus className="size-3.5" />
+            </ListRowAction>
+            <ListRowAction
+              label={t("navigator.newWorkspace")}
+              onClick={() => void run("workspace.create")}
+            >
+              <Plus className="size-3.5" />
+            </ListRowAction>
+          </div>
         }
       >
+        {creatingWorkspace && (
+          <form
+            className="flex flex-col gap-1.5 border border-border p-2"
+            data-testid="herdr-new-workspace-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const label = wsLabel.trim();
+              const cwd = wsCwd.trim();
+              setCreatingWorkspace(false);
+              setWsLabel("");
+              setWsCwd("");
+              void run("workspace.create", {
+                ...(label ? { label } : {}),
+                ...(cwd ? { cwd } : {}),
+              });
+            }}
+          >
+            <input
+              autoFocus
+              aria-label={t("navigator.workspaceLabel")}
+              placeholder={t("navigator.workspaceLabelPlaceholder")}
+              className="h-8 border border-border bg-transparent px-2 text-xs"
+              value={wsLabel}
+              maxLength={64}
+              onChange={(event) => setWsLabel(event.target.value)}
+            />
+            <input
+              aria-label={t("navigator.workspaceCwd")}
+              placeholder={t("navigator.workspaceCwdPlaceholder")}
+              className="h-8 border border-border bg-transparent px-2 text-xs"
+              value={wsCwd}
+              maxLength={512}
+              onChange={(event) => setWsCwd(event.target.value)}
+            />
+            <div className="flex justify-end gap-1">
+              <Button
+                size="sm"
+                variant="outline"
+                type="button"
+                onClick={() => setCreatingWorkspace(false)}
+              >
+                {t("navigator.cancel")}
+              </Button>
+              <Button size="sm" type="submit">
+                {t("navigator.create")}
+              </Button>
+            </div>
+          </form>
+        )}
+
         {workspaces.map((ws) => {
           const tabs = snapshot.tabs
             .filter((tab) => tab.workspace_id === ws.workspace_id)
             .sort((a, b) => a.number - b.number);
+          const isWorktree = Boolean(ws.worktree?.branch || ws.worktree?.path);
           return (
             <div key={ws.workspace_id} className="flex flex-col">
               {renaming === ws.workspace_id ? (
@@ -295,17 +610,38 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
               ) : (
                 <ListRow
                   title={`${ws.number}. ${ws.label}`}
-                  meta={t("navigator.tabCount", { count: ws.tab_count })}
+                  meta={
+                    ws.worktree?.branch
+                      ? `${ws.worktree.branch} · ${t("navigator.tabCount", { count: ws.tab_count })}`
+                      : t("navigator.tabCount", { count: ws.tab_count })
+                  }
                   selected={ws.focused}
                   tone={ws.focused ? "brand" : "none"}
                   badges={<StatusBadge status={ws.agent_status} />}
-                  onClick={() =>
+                  onClick={() => {
+                    if (ws.focused && onCloseNavigator) {
+                      onCloseNavigator();
+                      return;
+                    }
                     void run("workspace.focus", {
                       workspaceId: ws.workspace_id,
-                    })
-                  }
+                    });
+                  }}
                   actions={
                     <>
+                      <ListRowAction
+                        label={t("navigator.newWorktree")}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setWorktreeForWs((cur) =>
+                            cur === ws.workspace_id ? null : ws.workspace_id,
+                          );
+                          setWtBranch("");
+                          setWtLabel("");
+                        }}
+                      >
+                        <GitBranch className="size-3.5" />
+                      </ListRowAction>
                       <ListRowAction
                         label={t("navigator.rename")}
                         onClick={(event) => {
@@ -315,6 +651,22 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
                       >
                         <Pencil className="size-3.5" />
                       </ListRowAction>
+                      {isWorktree && (
+                        <ListRowAction
+                          label={t("navigator.removeWorktree")}
+                          tone="destructive"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void closeWithConfirm(
+                              "worktree.remove",
+                              { workspaceId: ws.workspace_id },
+                              ws.label,
+                            );
+                          }}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </ListRowAction>
+                      )}
                       <ListRowAction
                         label={t("navigator.closeWorkspace")}
                         tone="destructive"
@@ -333,6 +685,59 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
                   }
                 />
               )}
+
+              {worktreeForWs === ws.workspace_id && (
+                <form
+                  className="ml-4 flex flex-col gap-1.5 border border-border p-2"
+                  data-testid="herdr-new-worktree-form"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    const branch = wtBranch.trim();
+                    if (!branch) return;
+                    const label = wtLabel.trim();
+                    setWorktreeForWs(null);
+                    setWtBranch("");
+                    setWtLabel("");
+                    void run("worktree.create", {
+                      workspaceId: ws.workspace_id,
+                      branch,
+                      ...(label ? { label } : {}),
+                    });
+                  }}
+                >
+                  <input
+                    autoFocus
+                    aria-label={t("navigator.worktreeBranch")}
+                    placeholder={t("navigator.worktreeBranchPlaceholder")}
+                    className="h-8 border border-border bg-transparent px-2 text-xs"
+                    value={wtBranch}
+                    maxLength={128}
+                    onChange={(event) => setWtBranch(event.target.value)}
+                  />
+                  <input
+                    aria-label={t("navigator.workspaceLabel")}
+                    placeholder={t("navigator.workspaceLabelPlaceholder")}
+                    className="h-8 border border-border bg-transparent px-2 text-xs"
+                    value={wtLabel}
+                    maxLength={64}
+                    onChange={(event) => setWtLabel(event.target.value)}
+                  />
+                  <div className="flex justify-end gap-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      type="button"
+                      onClick={() => setWorktreeForWs(null)}
+                    >
+                      {t("navigator.cancel")}
+                    </Button>
+                    <Button size="sm" type="submit" disabled={!wtBranch.trim()}>
+                      {t("navigator.createWorktree")}
+                    </Button>
+                  </div>
+                </form>
+              )}
+
               {ws.focused && (
                 <div className="ml-4 flex flex-col border-l border-border pl-2">
                   {tabs.map((tab) =>
@@ -363,9 +768,13 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
                         })}
                         selected={tab.focused}
                         badges={<StatusBadge status={tab.agent_status} />}
-                        onClick={() =>
-                          void run("tab.focus", { tabId: tab.tab_id })
-                        }
+                        onClick={() => {
+                          if (tab.focused && onCloseNavigator) {
+                            onCloseNavigator();
+                            return;
+                          }
+                          void run("tab.focus", { tabId: tab.tab_id });
+                        }}
                         actions={
                           <>
                             <ListRowAction
@@ -418,7 +827,17 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
           title={t("navigator.panes")}
           action={
             focusedPane && (
-              <div className="flex gap-1">
+              <div className="flex flex-wrap gap-1">
+                <ListRowAction
+                  label={t("navigator.renamePane")}
+                  onClick={() =>
+                    setRenaming((cur) =>
+                      cur === focusedPane.pane_id ? null : focusedPane.pane_id,
+                    )
+                  }
+                >
+                  <Pencil className="size-3.5" />
+                </ListRowAction>
                 <ListRowAction
                   label={t("actions.splitRight")}
                   onClick={() =>
@@ -441,6 +860,19 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
                 >
                   <SquareSplitVertical className="size-3.5" />
                 </ListRowAction>
+                {nextSwapPaneId && (
+                  <ListRowAction
+                    label={t("navigator.swapPane")}
+                    onClick={() =>
+                      void run("pane.swap", {
+                        paneId: focusedPane.pane_id,
+                        targetPaneId: nextSwapPaneId,
+                      })
+                    }
+                  >
+                    <ArrowLeftRight className="size-3.5" />
+                  </ListRowAction>
+                )}
                 <ListRowAction
                   label={t("actions.zoom")}
                   onClick={() =>
@@ -466,7 +898,143 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
             )
           }
         >
-          <PaneMap layout={layout} panes={panes} run={run} />
+          {focusedPane && renaming === focusedPane.pane_id && (
+            <RenameField
+              initial={
+                focusedPane.label ?? paneName(focusedPane, focusedPane.pane_id)
+              }
+              onCancel={() => setRenaming(null)}
+              onClear={
+                focusedPane.label
+                  ? () => {
+                      setRenaming(null);
+                      void run("pane.rename", {
+                        paneId: focusedPane.pane_id,
+                        clear: true,
+                      });
+                    }
+                  : undefined
+              }
+              onSave={(label) => {
+                setRenaming(null);
+                void run("pane.rename", {
+                  paneId: focusedPane.pane_id,
+                  label,
+                });
+              }}
+            />
+          )}
+          <PaneMap
+            layout={layout}
+            panes={panes}
+            run={run}
+            onCloseNavigator={onCloseNavigator}
+          />
+          {focusedPane && layout.panes.length > 1 && (
+            <div className="flex items-center justify-between gap-1 pt-0.5">
+              <span className="text-[11px] text-muted-foreground">
+                {t("navigator.resizePane")}
+              </span>
+              <div className="flex gap-1">
+                {(["left", "down", "up", "right"] as const).map((dir) => (
+                  <ListRowAction
+                    key={dir}
+                    label={t(`navigator.resize.${dir}`)}
+                    onClick={() =>
+                      void run("pane.resize", {
+                        paneId: focusedPane.pane_id,
+                        direction: dir,
+                      })
+                    }
+                  >
+                    {dir === "left" && <ArrowLeft className="size-3.5" />}
+                    {dir === "down" && <ArrowDown className="size-3.5" />}
+                    {dir === "up" && <ArrowUp className="size-3.5" />}
+                    {dir === "right" && <ArrowRight className="size-3.5" />}
+                  </ListRowAction>
+                ))}
+              </div>
+            </div>
+          )}
+          {focusedPane && !focusedPane.agent && (
+            <div
+              className="flex flex-wrap items-center gap-1 pt-1"
+              data-testid="herdr-launch-agent"
+            >
+              <span className="text-[11px] text-muted-foreground">
+                {t("navigator.launchAgent")}:
+              </span>
+              {QUICK_AGENT_KINDS.map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  onClick={() =>
+                    void run("agent.start", {
+                      paneId: focusedPane.pane_id,
+                      kind,
+                    })
+                  }
+                  className="h-6 border border-border bg-background px-1.5 text-[11px] active:bg-muted"
+                >
+                  {kind}
+                </button>
+              ))}
+            </div>
+          )}
+        </Section>
+      )}
+
+      {focusedPane && readPane && (
+        <Section
+          title={t("navigator.outputPreview", {
+            name: paneName(focusedPane, focusedPane.pane_id),
+          })}
+          action={
+            <div className="flex gap-1">
+              {outputOpen && (
+                <>
+                  <ListRowAction
+                    label={t("navigator.copyOutput")}
+                    onClick={() => void copyOutput()}
+                  >
+                    <Copy className="size-3.5" />
+                  </ListRowAction>
+                  <ListRowAction
+                    label={t("navigator.refreshOutput")}
+                    onClick={() => void refreshOutput()}
+                  >
+                    <RotateCw
+                      className={cn(
+                        "size-3.5",
+                        outputLoading && "animate-spin",
+                      )}
+                    />
+                  </ListRowAction>
+                </>
+              )}
+              <ListRowAction
+                label={t(
+                  outputOpen ? "navigator.hideOutput" : "navigator.showOutput",
+                )}
+                onClick={() => setOutputOpen((open) => !open)}
+              >
+                {outputOpen ? (
+                  <ChevronDown className="size-3.5" />
+                ) : (
+                  <ChevronRight className="size-3.5" />
+                )}
+              </ListRowAction>
+            </div>
+          }
+        >
+          {outputOpen && (
+            <pre
+              data-testid="herdr-pane-output"
+              className="max-h-40 select-text overflow-auto whitespace-pre-wrap break-words border border-border bg-muted/30 p-2 font-mono text-[11px] leading-tight"
+            >
+              {outputText.trim() || t("navigator.emptyOutput")}
+            </pre>
+          )}
         </Section>
       )}
 
@@ -476,6 +1044,30 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
             name: paneName(focusedPane, focusedPane.pane_id),
           })}
         >
+          {isFocusedBlocked && (
+            <div
+              className="flex flex-col gap-1 border border-border p-1.5"
+              data-testid="herdr-blocked-triage"
+            >
+              <span className="text-[11px] text-muted-foreground">
+                {t("navigator.blockedHint")}
+              </span>
+              <div className="flex flex-wrap gap-1">
+                {APPROVAL_KEYS.map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() =>
+                      void sendQuickKeys(focusedPane.pane_id, item.keys)
+                    }
+                    className="h-7 border border-border bg-background px-2 text-xs active:bg-muted"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <Textarea
             value={draft}
             rows={3}
@@ -487,7 +1079,7 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
             onChange={(event) => setDraft(event.target.value)}
           />
           <div className="flex flex-wrap gap-1">
-            {focusedPane.agent && (
+            {focusedPane.agent && !isFocusedBlocked && (
               <Button
                 size="sm"
                 disabled={!draft}
@@ -498,7 +1090,9 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
             )}
             <Button
               size="sm"
-              variant={focusedPane.agent ? "outline" : "default"}
+              variant={
+                focusedPane.agent && !isFocusedBlocked ? "outline" : "default"
+              }
               disabled={!draft}
               onClick={() => void send("run")}
             >
@@ -512,6 +1106,16 @@ export function Navigator({ snapshot, run }: NavigatorProps) {
             >
               {t("navigator.type")}
             </Button>
+            {focusedPane.agent && isFocusedBlocked && (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!draft}
+                onClick={() => void send("prompt")}
+              >
+                {t("navigator.prompt")}
+              </Button>
+            )}
           </div>
         </Section>
       )}

@@ -209,3 +209,42 @@ describe("GET /hosts/:hostId/panes/:paneId/read", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("GET /hosts/:hostId/sessions", () => {
+  it("lists sessions on the host and supports session overrides", async () => {
+    const ssh = fakeSshClient(() => ({
+      out: JSON.stringify({
+        sessions: [
+          { name: "default", running: true, attached: 1 },
+          { name: "work", running: true, attached: 2 },
+        ],
+      }),
+    }));
+    server = await startServer({ sshClient: ssh.client });
+    const res = await server.request("GET", "/hosts/7/sessions?session=work");
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({
+      activeSession: "work",
+      sessions: [
+        { name: "default", running: true, attached: 1 },
+        { name: "work", running: true, attached: 2 },
+      ],
+    });
+    expect(ssh.scripts[0]).toContain("exec \"$H\" 'session' 'list' '--json'");
+  });
+
+  it("needs the use permission", async () => {
+    server = await startServer({ permissions: [] });
+    const res = await server.request("GET", "/hosts/7/sessions");
+    expect(res.status).toBe(403);
+  });
+
+  it("refuses an invalid session override", async () => {
+    server = await startServer();
+    const res = await server.request(
+      "GET",
+      "/hosts/7/state?session=bad;session",
+    );
+    expect(res.status).toBe(400);
+  });
+});

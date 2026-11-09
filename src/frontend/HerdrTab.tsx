@@ -20,6 +20,7 @@ import {
   ListBadge,
   ListRowAction,
   PanelShell,
+  useConfirm,
   useIsMobile,
 } from "@termix-ssh/plugin-sdk/ui";
 import {
@@ -30,9 +31,19 @@ import {
   RotateCw,
   TerminalSquare,
 } from "lucide-react";
-import type { HerdrSnapshot, HerdrState } from "../shared/herdr";
-import { apiErrorMessage, herdrApi, type ActionName } from "./api";
-import { herdrLaunchCommand } from "./host-settings";
+import type {
+  AgentStatus,
+  HerdrSessionInfo,
+  HerdrSnapshot,
+  HerdrState,
+} from "../shared/herdr";
+import {
+  apiErrorMessage,
+  apiHerdrCode,
+  herdrApi,
+  type ActionName,
+} from "./api";
+import { herdrLaunchCommand, herdrSessionName } from "./host-settings";
 import { KeyBar, type KeyBarActions } from "./KeyBar";
 import { Navigator } from "./Navigator";
 import {
@@ -90,6 +101,7 @@ function newInstanceId(): string {
 export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   const { t } = useTranslation();
   const toast = useToast();
+  const confirm = useConfirm();
   const isMobile = useIsMobile();
   const docs = useDocsUrl();
   const pluginApi = usePluginApi();
@@ -97,11 +109,25 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   const { values: userSettings } = useSettings("user");
 
   const hostId = Number(host?.id);
-  const api = useMemo(() => herdrApi(pluginApi, hostId), [pluginApi, hostId]);
-  const launch = herdrLaunchCommand(host);
+  const [sessionOverride, setSessionOverride] = useState<string | undefined>(
+    undefined,
+  );
+  const [sessions, setSessions] = useState<HerdrSessionInfo[]>([]);
+  const configuredSession = herdrSessionName(host);
+  const activeSession =
+    sessionOverride !== undefined
+      ? sessionOverride || "default"
+      : configuredSession || "default";
+
+  const api = useMemo(
+    () => herdrApi(pluginApi, hostId, sessionOverride),
+    [pluginApi, hostId, sessionOverride],
+  );
+  const launch = herdrLaunchCommand(host, sessionOverride);
 
   const touchSetting = String(userSettings.touchMouse ?? "auto");
   const keyBarSetting = String(userSettings.showKeyBar ?? "auto");
+  const notifySetting = String(userSettings.agentNotifications ?? "all");
   const longPressMs = Number(userSettings.longPressMs ?? 450) || 450;
   const prefix = prefixBytes(userSettings.prefixKey);
   const touchDevice = coarsePointer();
@@ -129,10 +155,15 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   const [navigatorOpen, setNavigatorOpen] = useState(false);
   const [state, setState] = useState<HerdrState | null>(null);
   const snapshotRef = useRef<HerdrSnapshot | null>(null);
+  const prevAgentStatusRef = useRef<Map<string, AgentStatus> | null>(null);
   snapshotRef.current =
     state && state.available
       ? (state as Extract<HerdrState, { available: true }>).snapshot
       : null;
+
+  useEffect(() => {
+    prevAgentStatusRef.current = null;
+  }, [hostId, sessionOverride]);
 
   // The embedded terminal, its handle and whether herdr asked for the mouse.
   const [instanceId, setInstanceId] = useState(
@@ -175,10 +206,45 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
     return { ...host, port, sshPort: port, instanceId };
   }, [host, instanceId]);
 
+  const notifySettingRef = useRef(notifySetting);
+  notifySettingRef.current = notifySetting;
+
   const refresh = useCallback(async () => {
     if (!Number.isFinite(hostId)) return;
     try {
-      setState(await api.state());
+      const nextState = await api.state();
+      if (nextState.available) {
+        const prev = prevAgentStatusRef.current;
+        const nextMap = new Map<string, AgentStatus>();
+        for (const agent of nextState.snapshot.agents) {
+          nextMap.set(agent.pane_id, agent.agent_status);
+          if (prev && notifySettingRef.current !== "off") {
+            const oldStatus = prev.get(agent.pane_id);
+            const name = agent.label || agent.agent || agent.pane_id;
+            if (oldStatus && oldStatus !== agent.agent_status) {
+              const workspace =
+                nextState.snapshot.workspaces.find(
+                  (ws) => ws.workspace_id === agent.workspace_id,
+                )?.label || agent.workspace_id;
+              if (agent.agent_status === "blocked") {
+                toast.warning(
+                  t("notifications.agentBlocked", { name, workspace }),
+                );
+              } else if (
+                agent.agent_status === "done" &&
+                (oldStatus === "working" || oldStatus === "blocked") &&
+                notifySettingRef.current === "all"
+              ) {
+                toast.success(
+                  t("notifications.agentDone", { name, workspace }),
+                );
+              }
+            }
+          }
+        }
+        prevAgentStatusRef.current = nextMap;
+      }
+      setState(nextState);
     } catch (err) {
       setState({
         available: false,
@@ -186,7 +252,25 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
         error: apiErrorMessage(err),
       });
     }
-  }, [api, hostId]);
+  }, [api, hostId, t, toast]);
+
+  useEffect(() => {
+    if (!navigatorOpen || !Number.isFinite(hostId)) return;
+    let cancelled = false;
+    void api
+      .sessions()
+      .then((res) => {
+        if (!cancelled && Array.isArray(res?.sessions)) {
+          setSessions(res.sessions);
+        }
+      })
+      .catch(() => {
+        // Ignore when sessions cannot be queried yet.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [navigatorOpen, hostId, api]);
 
   // Poll while visible: often with the navigator open, slowly otherwise so
   // the header can still flag agents that need you.
@@ -217,11 +301,46 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
         void refresh();
         return true;
       } catch (err) {
+        if (
+          action === "workspace.close" &&
+          !params?.group &&
+          apiHerdrCode(err) === "workspace_group_close_required"
+        ) {
+          const ok = await confirm({
+            title: t("navigator.confirm.workspaceGroupClose"),
+            description: t("navigator.confirm.description"),
+            confirmLabel: t("navigator.close"),
+            destructive: true,
+          });
+          if (ok) {
+            try {
+              await api.action("workspace.close", { ...params, group: true });
+              void refresh();
+              return true;
+            } catch (retryErr) {
+              toast.error(apiErrorMessage(retryErr));
+              return false;
+            }
+          }
+          return false;
+        }
         toast.error(apiErrorMessage(err));
         return false;
       }
     },
-    [api, refresh, toast],
+    [api, confirm, refresh, t, toast],
+  );
+
+  const selectSession = useCallback(
+    (nextSession: string) => {
+      const normalized = nextSession === "default" ? "" : nextSession;
+      if ((sessionOverride ?? configuredSession ?? "") === normalized) return;
+      setSessionOverride(normalized);
+      setState(null);
+      setHandle(null);
+      setInstanceId(newInstanceId());
+    },
+    [sessionOverride, configuredSession],
   );
 
   /** The current snapshot, fetching one when there is none yet. */
@@ -314,7 +433,17 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   const navigator = (
     <div className="flex h-full flex-col overflow-y-auto">
       {snapshot ? (
-        <Navigator snapshot={snapshot} run={run} />
+        <Navigator
+          snapshot={snapshot}
+          run={run}
+          readPane={api.readPane}
+          sessions={sessions}
+          activeSession={activeSession}
+          onSelectSession={selectSession}
+          onCloseNavigator={
+            isMobile ? () => setNavigatorOpen(false) : undefined
+          }
+        />
       ) : (
         <EmptyState
           icon={Bot}

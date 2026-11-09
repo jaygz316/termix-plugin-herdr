@@ -109,4 +109,23 @@ describe("TouchMouseLayer", () => {
     touch("pointerUp", 5, 5);
     expect(sent).toEqual([]);
   });
+
+  it("turns a two-finger tap into an immediate right click when both fingers lift", () => {
+    const { sent, layer, touch } = setup();
+    touch("pointerDown", 15, 5);
+    fireEvent.pointerDown(layer, {
+      pointerId: 9,
+      pointerType: "touch",
+      clientX: 45,
+      clientY: 5,
+    });
+    touch("pointerUp", 15, 5);
+    fireEvent.pointerUp(layer, {
+      pointerId: 9,
+      pointerType: "touch",
+      clientX: 45,
+      clientY: 5,
+    });
+    expect(sent).toEqual(["\x1b[<2;2;1M\x1b[<2;2;1m"]);
+  });
 });

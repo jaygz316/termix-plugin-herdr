@@ -9,6 +9,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CornerDownLeft,
+  Delete,
   Keyboard,
   LayoutList,
   Maximize2,
@@ -79,9 +80,9 @@ function BarButton({
 }
 
 /**
- * The keys a phone keyboard lacks, plus herdr's own actions. Ctrl and Alt
- * latch: the next key bar key, or the next character typed into the small
- * box that appears, gets them.
+ * The keys a phone keyboard lacks, plus herdr's own actions. Ctrl, Alt and
+ * Shift latch: the next key bar key, or the next character typed into the
+ * small box that appears, gets them.
  */
 export function KeyBar({
   send,
@@ -92,7 +93,12 @@ export function KeyBar({
 }: KeyBarProps) {
   const { t } = useTranslation();
   const [mods, setMods] = useState<Modifiers>(NO_MODS);
-  const latched = mods.ctrl || mods.alt;
+  const latched = mods.ctrl || mods.alt || mods.shift;
+  const activeModNames = [
+    mods.ctrl ? t("keys.ctrl") : null,
+    mods.alt ? t("keys.alt") : null,
+    mods.shift ? t("keys.shift") : null,
+  ].filter(Boolean);
 
   function key(name: BarKey) {
     send(keyBytes(name, mods, appCursor()));
@@ -129,6 +135,13 @@ export function KeyBar({
         >
           {t("keys.alt")}
         </BarButton>
+        <BarButton
+          label={t("keys.shift")}
+          active={mods.shift}
+          onPress={() => setMods((m) => ({ ...m, shift: !m.shift }))}
+        >
+          {t("keys.shift")}
+        </BarButton>
         <BarButton label={t("keys.esc")} onPress={() => key("esc")}>
           {t("keys.esc")}
         </BarButton>
@@ -149,6 +162,12 @@ export function KeyBar({
         </BarButton>
         <BarButton label={t("keys.enter")} onPress={() => key("enter")}>
           <CornerDownLeft className="size-4" />
+        </BarButton>
+        <BarButton label={t("keys.backspace")} onPress={() => key("backspace")}>
+          <Delete className="size-4" />
+        </BarButton>
+        <BarButton label={t("keys.slash")} onPress={() => key("slash")}>
+          /
         </BarButton>
         <BarButton label={t("keys.ctrlC")} onPress={() => key("ctrlC")}>
           ^C
@@ -171,17 +190,17 @@ export function KeyBar({
         <BarButton label={t("keys.ctrlD")} onPress={() => key("ctrlD")}>
           ^D
         </BarButton>
+        <BarButton label={t("keys.ctrlZ")} onPress={() => key("ctrlZ")}>
+          ^Z
+        </BarButton>
+        <BarButton label={t("keys.ctrlL")} onPress={() => key("ctrlL")}>
+          ^L
+        </BarButton>
       </div>
       {latched ? (
         <div className="flex items-center gap-2 px-1">
           <span className="text-xs text-muted-foreground">
-            {t(
-              mods.ctrl && mods.alt
-                ? "keys.typeCtrlAlt"
-                : mods.ctrl
-                  ? "keys.typeCtrl"
-                  : "keys.typeAlt",
-            )}
+            {`${activeModNames.join("+")} +`}
           </span>
           <input
             autoFocus
