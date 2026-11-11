@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0
+
+### Added
+
+- Native `herdr-app` desktop chrome around `hc attach` terminals: a collapsible left sidebar (`HerdrAppSidebar`) with colored Space badges, machine groupings (`This computer` and linked remote machines) and a Priority / Grouped-by-space Agents list; a top tab strip and `+` New Menu (`HerdrAppTabBar`) for opening terminals, launching agents (`claude`, `codex`, `gemini`, `opencode`, `copilot`, `cursor`, `pi`) in a new tab or creating spaces; a focused pane header bar with multi-pane split switching and quick split/zoom/interrupt actions; and a bottom status bar (`HerdrAppStatusBar`)
+- Host setting `runtimeMode` (`auto`, `hc` or `legacy`) to explicitly choose between `herdr-core` / `herdr-app` and legacy `herdr`, plus user settings `sidebarLayout` (`expanded`, `rail` or `hidden`) and `agentSort` (`priority` or `grouped`)
+
 ## 1.2.0
 
 ### Added

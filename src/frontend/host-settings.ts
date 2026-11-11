@@ -4,7 +4,9 @@ import {
   PLUGIN_ID,
   launchCommand,
   normalizeBinary,
+  normalizeRuntimeMode,
   normalizeSession,
+  type HerdrRuntimeMode,
   type LaunchOptions,
 } from "../shared/herdr";
 
@@ -24,6 +26,13 @@ export function herdrEnabled(
   host: PluginHostRecord | null | undefined,
 ): boolean {
   return settingsOf(host)[HOST_SETTINGS.enabled] !== false;
+}
+
+/** The configured runtime mode for this host ("auto", "hc" or "legacy"). */
+export function herdrRuntimeMode(
+  host: PluginHostRecord | null | undefined,
+): HerdrRuntimeMode {
+  return normalizeRuntimeMode(settingsOf(host)[HOST_SETTINGS.runtimeMode]);
 }
 
 /** The configured session name for this host ("" for default), or null when invalid. */
@@ -50,5 +59,12 @@ export function herdrLaunchCommand(
       : settings[HOST_SETTINGS.session],
   );
   if (binary === null || session === null) return null;
-  return launchCommand(binary, session, options);
+  const mode = normalizeRuntimeMode(settings[HOST_SETTINGS.runtimeMode]);
+  const effectiveRuntime =
+    options?.runtime ??
+    (mode === "hc" ? "hc" : mode === "legacy" ? "legacy" : undefined);
+  return launchCommand(binary, session, {
+    ...options,
+    ...(effectiveRuntime ? { runtime: effectiveRuntime } : {}),
+  });
 }

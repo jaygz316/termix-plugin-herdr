@@ -8,8 +8,10 @@ import {
   isHcBinaryName,
   isPaneId,
   normalizeBinary,
+  normalizeRuntimeMode,
   normalizeSession,
   type HerdrErrorCode,
+  type HerdrRuntimeMode,
   type HerdrSessionInfo,
   type HerdrSnapshot,
   type HerdrState,
@@ -41,6 +43,7 @@ interface HerdrTarget {
   host: PluginHostSummary;
   binary: string;
   session: string;
+  runtimeMode: HerdrRuntimeMode;
 }
 
 function errorMessage(err: unknown): string {
@@ -82,6 +85,9 @@ async function requireTarget(
     res.status(403).json({ error: "Herdr is turned off for this host" });
     return null;
   }
+  const runtimeMode = normalizeRuntimeMode(
+    await ctx.settings.getHost<string>(hostId, HOST_SETTINGS.runtimeMode),
+  );
   const binary = normalizeBinary(
     await ctx.settings.getHost<string>(hostId, HOST_SETTINGS.binary),
   );
@@ -99,7 +105,7 @@ async function requireTarget(
     });
     return null;
   }
-  return { host, binary, session };
+  return { host, binary, session, runtimeMode };
 }
 
 function withClient<T>(
@@ -329,7 +335,10 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
     try {
       const raw = await withClient(ctx, target, async (client) =>
         parseHerdrResult(
-          await runScript(client, buildSessionsScript(target.binary)),
+          await runScript(
+            client,
+            buildSessionsScript(target.binary, target.runtimeMode),
+          ),
         ),
       );
       res.json({
@@ -434,16 +443,24 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
     if (!target) return;
     try {
       const result = await withClient(ctx, target, async (client) => {
-        if (shouldUseHcForAction(target.binary, actionName, rawParams)) {
+        if (
+          shouldUseHcForAction(
+            target.binary,
+            actionName,
+            rawParams,
+            target.runtimeMode,
+          )
+        ) {
           return executeHcAction(client, target, actionName, rawParams);
         }
         if (
           actionName === "workspace.create" &&
+          target.runtimeMode !== "legacy" &&
           !isHcBinaryName(target.binary)
         ) {
           const probe = await runScript(
             client,
-            buildStateScript(target.binary, target.session),
+            buildStateScript(target.binary, target.session, target.runtimeMode),
           );
           if (probe.stdout.startsWith(HC_STATE_MARKER)) {
             return executeHcAction(client, target, actionName, rawParams);
@@ -511,7 +528,12 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
       if (!target) return;
       try {
         const lines = readLines(req.query.lines);
-        if (isHcBinaryName(target.binary) || !isLegacyEntityId(paneId)) {
+        if (
+          target.runtimeMode !== "legacy" &&
+          (target.runtimeMode === "hc" ||
+            isHcBinaryName(target.binary) ||
+            !isLegacyEntityId(paneId))
+        ) {
           const text = await withClient(ctx, target, (client) =>
             readHcPaneOutput(client, target, paneId, lines),
           );

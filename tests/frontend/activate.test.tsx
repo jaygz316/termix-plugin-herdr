@@ -417,6 +417,18 @@ describe("herdr activate", () => {
       }),
     );
 
+    // The native herdr-app chrome (left sidebar, top tab bar, bottom status bar)
+    // renders automatically around the terminal on hc hosts.
+    expect(screen.getByTestId("herdr-app-sidebar")).toBeTruthy();
+    expect(screen.getByTestId("herdr-app-tabbar")).toBeTruthy();
+    expect(screen.getByTestId("herdr-app-statusbar")).toBeTruthy();
+
+    // Collapsing the sidebar switches to the compact numbered rail.
+    fireEvent.click(screen.getByLabelText(locales.toolbar.sidebarCollapse));
+    expect(screen.getByTestId("herdr-app-rail")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText(locales.toolbar.sidebarExpand));
+    expect(screen.getByTestId("herdr-app-sidebar")).toBeTruthy();
+
     fireEvent.click(await screen.findByLabelText(locales.toolbar.navigator));
     expect(await screen.findByText(/relabeled income/)).toBeTruthy();
 

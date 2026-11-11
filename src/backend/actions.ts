@@ -205,6 +205,7 @@ const builders: Record<string, (params: Params) => HerdrAction> = {
   "tab.create": (p) => {
     const name = label(p, false);
     const cwd = cwdPath(p, "cwd");
+    if (p.agent !== undefined) agentKind({ kind: p.agent });
     return cli(
       "tab",
       "create",

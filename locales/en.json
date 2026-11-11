@@ -13,12 +13,37 @@
     "badSettingsHint": "Edit the host and check the herdr path and session name under Herdr."
   },
   "toolbar": {
+    "sidebarExpand": "Expand Herdr sidebar",
+    "sidebarCollapse": "Collapse Herdr sidebar",
     "touchOn": "Turn on touch as mouse",
     "touchOff": "Turn off touch as mouse",
     "keysOn": "Show the key bar",
     "keysOff": "Hide the key bar",
     "navigator": "Workspaces, tabs and agents",
     "reattach": "Reconnect and attach again"
+  },
+  "chrome": {
+    "spaces": "Spaces",
+    "thisComputer": "This computer",
+    "newSpace": "New space",
+    "newWorktree": "New worktree…",
+    "newTerminal": "Terminal",
+    "startAgent": "Start an agent",
+    "agents": "Agents",
+    "noAgents": "No active agents",
+    "sortPriority": "Priority",
+    "sortGrouped": "Grouped by space",
+    "sortToggleHint": "Switch between priority order and grouped by space",
+    "pinned": "Pinned",
+    "needsYou": "Needs you",
+    "done": "Done",
+    "working": "Working",
+    "idle": "Idle",
+    "zoomed": "Zoomed",
+    "newMenu": "New tab, agent or space",
+    "agentCount_one": "{{count}} agent",
+    "agentCount_other": "{{count}} agents",
+    "needsYouCount": "{{count}} needs you"
   },
   "status": {
     "connecting": "Connecting",
@@ -183,18 +208,38 @@
         "label": "Herdr",
         "description": "Offer the Herdr view for this host."
       },
+      "runtimeMode": {
+        "label": "Herdr runtime",
+        "description": "Choose whether this host uses the new herdr-core (hc) + herdr-app runtime or the legacy herdr 0.9.x TUI.",
+        "auto": "Auto (prefer herdr-core / herdr-app)",
+        "hc": "herdr-core / herdr-app (hc)",
+        "legacy": "Legacy herdr TUI (0.9.x)"
+      },
       "binaryPath": {
-        "label": "herdr command",
-        "description": "The herdr binary on the host. A name on PATH or a full path; ~/ is your home folder.",
-        "placeholder": "herdr"
+        "label": "herdr / hc command",
+        "description": "The hc, herdr-core or herdr binary on the host. A name on PATH or a full path; ~/ is your home folder.",
+        "placeholder": "hc"
       },
       "sessionName": {
         "label": "Session",
-        "description": "A named herdr session to use. Leave empty for the default session.",
+        "description": "A named herdr or HC_SESSION session to use. Leave empty for the default session.",
         "placeholder": "default"
       }
     },
     "user": {
+      "sidebarLayout": {
+        "label": "Herdr sidebar",
+        "description": "How the herdr-app Spaces and Agents left sidebar opens on desktop.",
+        "expanded": "Expanded (Spaces + Agents)",
+        "rail": "Compact icon rail",
+        "hidden": "Hidden"
+      },
+      "agentSort": {
+        "label": "Agent list grouping",
+        "description": "How agents are grouped in the Herdr sidebar.",
+        "priority": "By priority (Needs you, Done, Working, Idle)",
+        "grouped": "Grouped by space"
+      },
       "touchMouse": {
         "label": "Touch as mouse",
         "description": "Turn taps, long presses, drags and swipes into mouse clicks, right clicks, drags and scrolling for herdr.",

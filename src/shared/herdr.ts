@@ -6,6 +6,7 @@ export const PLUGIN_ID = "herdr";
 /** Host setting keys, as declared in manifest.json. */
 export const HOST_SETTINGS = {
   enabled: "enableHerdr",
+  runtimeMode: "runtimeMode",
   binary: "binaryPath",
   session: "sessionName",
 } as const;
@@ -13,6 +14,12 @@ export const HOST_SETTINGS = {
 export const DEFAULT_BINARY = "herdr";
 
 export type HerdrRuntime = "hc" | "legacy";
+export type HerdrRuntimeMode = "auto" | "hc" | "legacy";
+
+export function normalizeRuntimeMode(value: unknown): HerdrRuntimeMode {
+  if (value === "hc" || value === "legacy") return value;
+  return "auto";
+}
 
 // Legacy herdr ids look like w1, w1:t1 and w1:p1; new herdr-core (hc) /
 // herdr-app ids look like sp<hex>, tb<hex>, p<hex>, t<base36> (or a terminal

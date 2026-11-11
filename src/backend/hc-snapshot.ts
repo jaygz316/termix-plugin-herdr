@@ -7,6 +7,7 @@ import {
   type HerdrMachineInfo,
   type HerdrPane,
   type HerdrRect,
+  type HerdrRuntimeMode,
   type HerdrSnapshot,
   type HerdrTab,
   type HerdrWorkspace,
@@ -368,12 +369,20 @@ function hcCollectCommands(binVar: string, session: string): string[] {
 /**
  * Builds the `sh -s` script for `GET /hosts/:hostId/state`.
  *
- * When the host binary is the default `herdr`, this prefers `hc` (`herdr-core`)
- * whenever `hc` is installed and no legacy `herdr` daemon is running, while
- * keeping the exact `exec "$H" ... 'api' 'snapshot'` tail for legacy hosts.
+ * When `runtimeMode` is `"hc"` or the host binary is `hc`/`herdr-core`, this
+ * queries `hc connect` directly. When `runtimeMode` is `"auto"` and the host
+ * binary is the default `herdr`, this prefers `hc` whenever `hc` is installed,
+ * while keeping the exact `exec "$H" ... 'api' 'snapshot'` tail for legacy hosts.
  */
-export function buildStateScript(binary: string, session: string): string {
-  if (isHcBinaryName(binary)) {
+export function buildStateScript(
+  binary: string,
+  session: string,
+  runtimeMode: HerdrRuntimeMode = "auto",
+): string {
+  if (
+    runtimeMode === "hc" ||
+    (runtimeMode !== "legacy" && isHcBinaryName(binary))
+  ) {
     return [
       ...hcScriptHead(binary, session),
       ...hcCollectCommands("$H", session),
@@ -387,7 +396,9 @@ export function buildStateScript(binary: string, session: string): string {
   const prefix = session ? `"$H" --session ${shQuote(session)}` : `"$H"`;
 
   const autoDetectHc =
-    binary === DEFAULT_BINARY && !session.startsWith("termix-it-")
+    runtimeMode !== "legacy" &&
+    binary === DEFAULT_BINARY &&
+    !session.startsWith("termix-it-")
       ? [
           'if command -v hc >/dev/null 2>&1; then HC_BIN=hc; elif command -v herdr-core >/dev/null 2>&1; then HC_BIN=herdr-core; else HC_BIN=""; fi',
           'if [ -n "$HC_BIN" ]; then',

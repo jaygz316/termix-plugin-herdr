@@ -6,7 +6,7 @@ Herdr opens [herdr](https://herdr.dev), the terminal workspace manager for codin
 2. Install Herdr from the Plugins tab. It needs the SSH Terminal plugin, which Termix ships with.
 3. Press the robot button on a host, or choose Open in Herdr in the host's menu or the command palette.
 
-Herdr is on for every SSH host. To hide it for a host, or to use a different herdr binary or a named session, edit the host and open the Herdr section.
+Herdr is on for every SSH host. To hide it for a host, choose between `herdr-core` (`hc`) and legacy `herdr`, or set a custom binary path or named session, edit the host and open the Herdr section. On `hc` hosts, Herdr renders a `herdr-app` sidebar (Spaces and Agents, collapsible to a compact icon rail), top tab bar with a `+` menu to launch agents or tabs, pane header bar and bottom status bar around the terminal.
 
 ## Touch as mouse
 

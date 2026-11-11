@@ -44,7 +44,17 @@ import {
   herdrApi,
   type ActionName,
 } from "./api";
-import { herdrLaunchCommand, herdrSessionName } from "./host-settings";
+import {
+  herdrLaunchCommand,
+  herdrRuntimeMode,
+  herdrSessionName,
+} from "./host-settings";
+import {
+  HerdrAppSidebar,
+  type AgentSortMode,
+  type SidebarMode,
+} from "./HerdrAppSidebar";
+import { HerdrAppStatusBar, HerdrAppTabBar } from "./HerdrAppTabBar";
 import { KeyBar, type KeyBarActions } from "./KeyBar";
 import { Navigator } from "./Navigator";
 import {
@@ -143,11 +153,18 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   const { values: userSettings } = useSettings("user");
 
   const hostId = Number(host?.id);
+  const configuredRuntimeMode = herdrRuntimeMode(host);
   const [sessionOverride, setSessionOverride] = useState<string | undefined>(
     undefined,
   );
   const [sessions, setSessions] = useState<HerdrSessionInfo[]>([]);
-  const [runtime, setRuntime] = useState<HerdrRuntime | undefined>(undefined);
+  const [runtime, setRuntime] = useState<HerdrRuntime | undefined>(() =>
+    configuredRuntimeMode === "hc"
+      ? "hc"
+      : configuredRuntimeMode === "legacy"
+        ? "legacy"
+        : undefined,
+  );
   const [attachedTerminalId, setAttachedTerminalId] = useState<string | null>(
     null,
   );
@@ -174,9 +191,34 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   const touchSetting = String(userSettings.touchMouse ?? "auto");
   const keyBarSetting = String(userSettings.showKeyBar ?? "auto");
   const notifySetting = String(userSettings.agentNotifications ?? "all");
+  const sidebarSetting = String(
+    userSettings.sidebarLayout ?? "expanded",
+  ) as SidebarMode;
+  const agentSortSetting = String(
+    userSettings.agentSort ?? "priority",
+  ) as AgentSortMode;
   const longPressMs = Number(userSettings.longPressMs ?? 450) || 450;
   const prefix = prefixBytes(userSettings.prefixKey);
   const touchDevice = coarsePointer();
+
+  const [sidebarMode, setSidebarMode] = useState<SidebarMode>(
+    sidebarSetting === "rail" || sidebarSetting === "hidden"
+      ? sidebarSetting
+      : "expanded",
+  );
+  const [agentSort, setAgentSort] = useState<AgentSortMode>(
+    agentSortSetting === "grouped" ? "grouped" : "priority",
+  );
+  useEffect(() => {
+    setSidebarMode(
+      sidebarSetting === "rail" || sidebarSetting === "hidden"
+        ? sidebarSetting
+        : "expanded",
+    );
+  }, [sidebarSetting]);
+  useEffect(() => {
+    setAgentSort(agentSortSetting === "grouped" ? "grouped" : "priority");
+  }, [agentSortSetting]);
 
   const [touchOn, setTouchOn] = useState(
     touchSetting === "on" || (touchSetting === "auto" && touchDevice),
@@ -260,13 +302,14 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
     try {
       const nextState = await api.state();
       if (nextState.available) {
-        if (
-          nextState.snapshot.runtime === "hc" &&
-          runtimeRef.current !== "hc"
-        ) {
+        if (nextState.snapshot.runtime === "hc") {
           const initialTerm = nextState.snapshot.focused_terminal_id ?? null;
-          setRuntime("hc");
-          setAttachedTerminalId(initialTerm);
+          if (runtimeRef.current !== "hc") {
+            setRuntime("hc");
+            setAttachedTerminalId(initialTerm);
+          } else if (!attachedTerminalRef.current && initialTerm) {
+            setAttachedTerminalId(initialTerm);
+          }
         }
         const prev = prevAgentStatusRef.current;
         const nextMap = new Map<string, AgentStatus>();
@@ -339,7 +382,9 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
       if (!stopped) {
         timer = window.setTimeout(
           tick,
-          navigatorOpen ? POLL_OPEN_MS : POLL_CLOSED_MS,
+          navigatorOpen || runtimeRef.current === "hc"
+            ? POLL_OPEN_MS
+            : POLL_CLOSED_MS,
         );
       }
     };
@@ -353,11 +398,17 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   const run = useCallback(
     async (action: ActionName, params?: Record<string, unknown>) => {
       try {
-        const nextTerm =
+        const predictedTerm =
           runtimeRef.current === "hc"
             ? resolveFocusTerminalId(snapshotRef.current, action, params)
             : null;
-        await api.action(action, params);
+        const response = (await api.action(action, params)) as
+          { result?: { terminal_id?: string } } | undefined;
+        const returnedTerm =
+          typeof response?.result?.terminal_id === "string"
+            ? response.result.terminal_id
+            : null;
+        const nextTerm = returnedTerm ?? predictedTerm;
         if (nextTerm && nextTerm !== attachedTerminalRef.current) {
           setAttachedTerminalId(nextTerm);
           const nextCmd = herdrLaunchCommand(host, sessionOverride, {
@@ -531,6 +582,10 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
     </div>
   );
 
+  const showHcChrome = Boolean(snapshot && snapshot.runtime === "hc");
+  const effectiveSidebarMode: SidebarMode =
+    navigatorOpen && sidebarMode === "expanded" ? "rail" : sidebarMode;
+
   return (
     <PanelShell
       icon={<Bot className="size-4" />}
@@ -584,7 +639,28 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
       }
     >
       <div className="flex min-h-0 flex-1">
+        {showHcChrome && snapshot && !isMobile && (
+          <HerdrAppSidebar
+            snapshot={snapshot}
+            run={run}
+            mode={effectiveSidebarMode}
+            onModeChange={setSidebarMode}
+            agentSort={agentSort}
+            onAgentSortChange={setAgentSort}
+          />
+        )}
         <div className="relative flex min-w-0 flex-1 flex-col">
+          {showHcChrome && snapshot && (
+            <HerdrAppTabBar
+              snapshot={snapshot}
+              run={run}
+              sidebarMode={isMobile ? "hidden" : effectiveSidebarMode}
+              onExpandSidebar={() => {
+                if (isMobile) setNavigatorOpen(true);
+                else setSidebarMode("expanded");
+              }}
+            />
+          )}
           <div
             ref={terminalRef}
             className="relative min-h-0 flex-1 overflow-hidden"
@@ -617,6 +693,14 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
               appCursor={() => handle?.getApplicationCursorKeysMode() ?? false}
               showKeyboard={() => handle?.focus()}
               actions={keyBarActions}
+            />
+          )}
+          {showHcChrome && snapshot && (
+            <HerdrAppStatusBar
+              snapshot={snapshot}
+              sessions={sessions}
+              activeSession={activeSession}
+              onSelectSession={selectSession}
             />
           )}
           {navigatorOpen && isMobile && (

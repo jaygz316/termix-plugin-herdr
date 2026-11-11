@@ -1,5 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { DEFAULT_BINARY, isHcBinaryName, isPaneId } from "../shared/herdr.js";
+import {
+  DEFAULT_BINARY,
+  isHcBinaryName,
+  isPaneId,
+  type HerdrRuntimeMode,
+} from "../shared/herdr.js";
 import {
   HerdrCommandError,
   NOT_FOUND_MARK,
@@ -27,6 +32,7 @@ import {
 export interface HcTarget {
   binary: string;
   session: string;
+  runtimeMode?: HerdrRuntimeMode;
 }
 
 const LEGACY_ID_RE = /^w[0-9A-Za-z]{1,16}(?::[tp][0-9A-Za-z]{1,16})?$/;
@@ -45,8 +51,10 @@ export function shouldUseHcForAction(
   binary: string,
   actionName: string,
   params: Record<string, unknown>,
+  runtimeMode: HerdrRuntimeMode = "auto",
 ): boolean {
-  if (isHcBinaryName(binary)) return true;
+  if (runtimeMode === "legacy") return false;
+  if (runtimeMode === "hc" || isHcBinaryName(binary)) return true;
   if (actionName === "pane.interrupt" || actionName === "agent.pin") {
     return true;
   }
@@ -62,7 +70,10 @@ export function shouldUseHcForAction(
  * Builds the `sh -s` script for `GET /hosts/:hostId/sessions`, supporting both
  * `hc` (`herdr-core`) state/socket directories and legacy `herdr session list`.
  */
-export function buildSessionsScript(binary: string): string {
+export function buildSessionsScript(
+  binary: string,
+  runtimeMode: HerdrRuntimeMode = "auto",
+): string {
   const hcCollect = [
     'state_dir="${XDG_STATE_HOME:-$HOME/.local/state}/herdr-core"',
     'run_dir="${XDG_RUNTIME_DIR:-/tmp}/herdr-core"',
@@ -85,7 +96,10 @@ export function buildSessionsScript(binary: string): string {
     `printf ']}\\n'`,
   ];
 
-  if (isHcBinaryName(binary)) {
+  if (
+    runtimeMode === "hc" ||
+    (runtimeMode !== "legacy" && isHcBinaryName(binary))
+  ) {
     return [...hcScriptHead(binary, ""), ...hcCollect, ""].join("\n");
   }
 
@@ -93,7 +107,7 @@ export function buildSessionsScript(binary: string): string {
     ? `H="$HOME"/${shQuote(binary.slice(2))}`
     : `H=${shQuote(binary)}`;
   const autoDetect =
-    binary === DEFAULT_BINARY
+    runtimeMode !== "legacy" && binary === DEFAULT_BINARY
       ? [
           'if command -v hc >/dev/null 2>&1; then HC_BIN=hc; elif command -v herdr-core >/dev/null 2>&1; then HC_BIN=herdr-core; else HC_BIN=""; fi',
           'if [ -n "$HC_BIN" ]; then',
@@ -153,7 +167,7 @@ async function fetchHcDocAndTerminals(
 }> {
   const res = await runScript(
     client,
-    buildStateScript(target.binary, target.session),
+    buildStateScript(target.binary, target.session, target.runtimeMode),
   );
   checkHerdrResult(res);
 
@@ -804,12 +818,14 @@ export async function executeHcAction(
       const wsId = String(params.workspaceId);
       const name = typeof params.label === "string" ? params.label.trim() : "";
       const cwd = typeof params.cwd === "string" ? params.cwd.trim() : "";
+      const agent = typeof params.agent === "string" ? params.agent.trim() : "";
       if (
-        await tryHerdrAppDo(client, "tab.new", {
+        !agent &&
+        (await tryHerdrAppDo(client, "tab.new", {
           spaceId: wsId,
           ...(name ? { name } : {}),
           ...(cwd ? { cwd } : {}),
-        })
+        }))
       ) {
         return { workspace_id: wsId };
       }
@@ -823,7 +839,7 @@ export async function executeHcAction(
       }
       const tbId = randomHexId("tb");
       const paneId = randomHexId("p");
-      const tabName = name || String((space.tabs?.length ?? 0) + 1);
+      const tabName = name || agent || String((space.tabs?.length ?? 0) + 1);
       const termAddr = await createHcTerminal(client, target, {
         cwd: cwd || space.folder || null,
         spaceId: wsId,
@@ -854,7 +870,19 @@ export async function executeHcAction(
         [tbId]: { focused: paneId, zoomed: null, settled: null },
       };
       await saveHcDocAndView(client, target, docValue, docVersion, view);
-      return { tab_id: tbId, terminal_id: termAddr };
+      if (agent) {
+        await runScript(
+          client,
+          buildHcScript(target.binary, target.session, [
+            "send",
+            "--force",
+            "--json",
+            termAddr,
+            agent,
+          ]),
+        );
+      }
+      return { tab_id: tbId, pane_id: paneId, terminal_id: termAddr };
     }
 
     case "tab.rename": {
@@ -1237,7 +1265,7 @@ export async function readHostSnapshot(
 ) {
   const result = await runScript(
     client,
-    buildStateScript(target.binary, target.session),
+    buildStateScript(target.binary, target.session, target.runtimeMode),
   );
   const snapshot = parseStateOutput(result);
   if (!snapshot || !Array.isArray(snapshot.workspaces)) {
