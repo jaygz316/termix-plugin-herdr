@@ -248,3 +248,227 @@ describe("GET /hosts/:hostId/sessions", () => {
     expect(res.status).toBe(400);
   });
 });
+
+describe("herdr-core (hc) + herdr-app compatibility", () => {
+  const hcStateDump = [
+    "__TERMIX_HC_STATE__",
+    JSON.stringify({
+      id: 1,
+      jsonrpc: "2.0",
+      result: { version: "0.1.19", core: { id: "c1", name: "fedora" } },
+    }),
+    JSON.stringify({
+      id: 2,
+      jsonrpc: "2.0",
+      result: {
+        machines: [
+          {
+            name: "ucloud",
+            target: "ucloud",
+            state: "connected",
+            version: "0.1.19",
+          },
+        ],
+        terminals: [
+          {
+            address: "t5",
+            state: "live",
+            cwd: "/home/jay",
+            foreground: {
+              name: "claude",
+              argv: ["claude"],
+              cwd: "/home/jay/projects/money",
+              pid: 100,
+            },
+            keep: true,
+            labels: {
+              "herdr.space": "sp903df98277bdbccbfbf63cdea22046d6",
+              "herdr.tab": "tb687ff508b103c6e1ee70bb55917be69a",
+              "herdr.seen": "12",
+              "herdr.pinned": "true",
+              where: "money / money",
+            },
+            reported: true,
+            status: {
+              app: "claude-code",
+              msg: "awaiting review",
+              state: "done",
+            },
+            title: "Inbox",
+            turn: 13,
+          },
+          {
+            address: "ucloud/t4",
+            state: "live",
+            cwd: "/home/jay/projects/gt",
+            foreground: {
+              name: "claude",
+              argv: ["claude"],
+              cwd: "/home/jay/projects/gt",
+              pid: 200,
+            },
+            keep: true,
+            labels: {
+              "herdr.space": "sp271073d0a9a1526e53b0f1853092deb8",
+              "herdr.tab": "tb4300cf870720dedae63f021cfcf29205",
+              where: "gt / main",
+            },
+            reported: true,
+            status: {
+              app: "claude-code",
+              msg: "Allow tool?",
+              state: "blocked",
+            },
+            title: "Triage",
+            turn: 4,
+          },
+        ],
+      },
+    }),
+    JSON.stringify({
+      id: 3,
+      jsonrpc: "2.0",
+      result: {
+        version: 24,
+        value: {
+          spaces: [
+            {
+              id: "sp903df98277bdbccbfbf63cdea22046d6",
+              name: "",
+              folder: "/home/jay",
+              tabs: [
+                {
+                  id: "tb687ff508b103c6e1ee70bb55917be69a",
+                  name: "money",
+                  root: {
+                    id: "tb687ff508b103c6e1ee70bb55917be69a",
+                    type: "row",
+                    children: [
+                      {
+                        id: "pf7b33a07abda79c075e93c65579ee5ee",
+                        type: "block",
+                        size: { weight: 1 },
+                        content: { terminal: "t5" },
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      },
+    }),
+    "__TERMIX_HC_VIEW__",
+    JSON.stringify({
+      active: "sp903df98277bdbccbfbf63cdea22046d6",
+      spaces: {
+        sp903df98277bdbccbfbf63cdea22046d6:
+          "tb687ff508b103c6e1ee70bb55917be69a",
+      },
+      tabs: {
+        tb687ff508b103c6e1ee70bb55917be69a: {
+          focused: "pf7b33a07abda79c075e93c65579ee5ee",
+          zoomed: null,
+        },
+      },
+    }),
+  ].join("\n");
+
+  it("synthesizes a snapshot from hc connect and herdr-app docs", async () => {
+    const ssh = fakeSshClient(() => ({ out: hcStateDump }));
+    server = await startServer({ sshClient: ssh.client });
+    const res = await server.request("GET", "/hosts/7/state");
+    expect(res.status).toBe(200);
+    expect(res.body.available).toBe(true);
+    const snap = res.body.snapshot;
+    expect(snap.runtime).toBe("hc");
+    expect(snap.version).toBe("0.1.19");
+    expect(snap.focused_workspace_id).toBe(
+      "sp903df98277bdbccbfbf63cdea22046d6",
+    );
+    expect(snap.focused_pane_id).toBe("pf7b33a07abda79c075e93c65579ee5ee");
+    expect(snap.focused_terminal_id).toBe("t5");
+    expect(snap.workspaces).toHaveLength(2);
+    expect(snap.workspaces[0]).toMatchObject({
+      workspace_id: "sp903df98277bdbccbfbf63cdea22046d6",
+      label: "money",
+      agent_status: "done",
+    });
+    expect(snap.workspaces[1]).toMatchObject({
+      workspace_id: "ucloud/sp271073d0a9a1526e53b0f1853092deb8",
+      label: "ucloud: gt",
+      machine: "ucloud",
+      agent_status: "blocked",
+    });
+    expect(snap.agents).toHaveLength(2);
+    expect(snap.agents[0]).toMatchObject({
+      pane_id: "pf7b33a07abda79c075e93c65579ee5ee",
+      terminal_id: "t5",
+      agent: "claude",
+      agent_status: "done",
+      status_msg: "awaiting review",
+      pinned: true,
+      unseen: true,
+    });
+    expect(snap.machines).toEqual([
+      {
+        name: "ucloud",
+        target: "ucloud",
+        state: "connected",
+        version: "0.1.19",
+      },
+    ]);
+  });
+
+  it("reads hc terminal output and runs hc actions", async () => {
+    const ssh = fakeSshClient((script) => {
+      if (script.includes("__TERMIX_HC_STATE__")) return { out: hcStateDump };
+      if (script.includes("'read' '--lines' '10' 't5'")) {
+        return { out: "hello from hc\n" };
+      }
+      return { out: '{"ok":true}\n' };
+    });
+    server = await startServer({ sshClient: ssh.client });
+
+    const readRes = await server.request(
+      "GET",
+      "/hosts/7/panes/pf7b33a07abda79c075e93c65579ee5ee/read?lines=10",
+    );
+    expect(readRes.status).toBe(200);
+    expect(readRes.body).toEqual({ text: "hello from hc\n" });
+
+    const pinRes = await server.request("POST", "/hosts/7/actions", {
+      action: "agent.pin",
+      params: { paneId: "ucloud/t4", pinned: true },
+    });
+    expect(pinRes.status).toBe(200);
+    expect(ssh.scripts.at(-1)).toContain(
+      `'label' '--json' 'ucloud/t4' 'herdr.pinned=true'`,
+    );
+
+    const intRes = await server.request("POST", "/hosts/7/actions", {
+      action: "pane.interrupt",
+      params: { paneId: "ucloud/t4" },
+    });
+    expect(intRes.status).toBe(200);
+    expect(ssh.scripts.at(-1)).toContain(`'interrupt' '--json' 'ucloud/t4'`);
+  });
+
+  it("maps hc's blocked refusal to agent_blocked", async () => {
+    const ssh = fakeSshClient(() => ({
+      code: 9,
+      err: '{"error":{"code":-32009,"data":{"kind":"blocked"},"message":"terminal is blocked"}}',
+    }));
+    server = await startServer({ sshClient: ssh.client });
+    const res = await server.request("POST", "/hosts/7/actions", {
+      action: "agent.prompt",
+      params: { paneId: "ucloud/t4", text: "continue" },
+    });
+    expect(res.status).toBe(422);
+    expect(res.body).toMatchObject({
+      error: "terminal is blocked",
+      herdrCode: "agent_blocked",
+    });
+  });
+});

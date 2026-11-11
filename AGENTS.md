@@ -48,10 +48,19 @@ Keep this section current when the plugin changes: what it does, how it is put t
 aren't obvious from the code, and anything that has bitten you before.
 
 - What it does: makes herdr (https://herdr.dev, a terminal workspace manager for coding agents) usable
-  from Termix, especially on phones: touch as mouse, a key bar and a navigator over herdr's API.
+  from Termix, especially on phones: touch as mouse, a key bar and a navigator over herdr's API. Supports
+  both the new `herdr-core` (`hc`) + `herdr-app` architecture (`src/backend/hc-snapshot.ts` and
+  `src/backend/hc-actions.ts`) and legacy `herdr` (`0.9.x`).
 - The terminal is not ours. `HerdrTab` embeds the SSH Terminal plugin's `terminal.view` component with
-  `executeCommand` set to `herdr [--session X]`, so host keys, TOTP, jump hosts and themes all work. Its
-  handle gives `sendInput` and `subscribeOutput`; nothing else of xterm is exposed.
+  `executeCommand` set to `hc attach <terminal>` on `hc` hosts (or `herdr [--session X]` on legacy hosts),
+  so host keys, TOTP, jump hosts and themes all work. Its handle gives `sendInput` and `subscribeOutput`;
+  nothing else of xterm is exposed.
+- On `hc` hosts, `buildStateScript` in `src/backend/hc-snapshot.ts` pipes `server.status`, `terminal.list`
+  and `doc.get("herdr-app")` into `hc connect` on stdin and reads `~/.config/herdr-app/view.json` to
+  synthesize the workspace/tab/pane/layout/agent snapshot, including spaces on linked remote machines
+  (`<machine>/<terminal>`). Actions in `src/backend/hc-actions.ts` drive `herdr-app do` when the desktop
+  window is running and fall back to direct `hc` CLI / JSON-RPC mutations (`doc.set`, `terminal.run`,
+  `terminal.kill`, `terminal.label`, `view.json`) on headless servers.
 - Touch as mouse (`TouchMouseLayer`) sits over the terminal and writes SGR (1006) mouse reports with
   `sendInput` (including two-finger tap as immediate right-click). It only shows while `MouseModeTracker`
   has seen herdr turn on modes 1000/1002/1003 in the output, so a plain shell never gets mouse bytes. Cell

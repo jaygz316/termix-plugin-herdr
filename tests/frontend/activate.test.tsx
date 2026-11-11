@@ -314,4 +314,121 @@ describe("herdr activate", () => {
       }),
     );
   });
+
+  it("attaches directly to hc terminals when snapshot runtime is hc", async () => {
+    const terminal = fakeTerminal();
+    const post = vi.fn(async () => ({ data: { result: {} } }));
+    const hcSnapshot = {
+      version: "0.1.19",
+      protocol: 2,
+      runtime: "hc",
+      focused_workspace_id: "sp903df98277bdbccbfbf63cdea22046d6",
+      focused_tab_id: "tb687ff508b103c6e1ee70bb55917be69a",
+      focused_pane_id: "pf7b33a07abda79c075e93c65579ee5ee",
+      focused_terminal_id: "t5",
+      workspaces: [
+        {
+          workspace_id: "sp903df98277bdbccbfbf63cdea22046d6",
+          label: "money",
+          number: 1,
+          focused: true,
+          active_tab_id: "tb687ff508b103c6e1ee70bb55917be69a",
+          agent_status: "done",
+          pane_count: 1,
+          tab_count: 1,
+        },
+      ],
+      tabs: [
+        {
+          tab_id: "tb687ff508b103c6e1ee70bb55917be69a",
+          workspace_id: "sp903df98277bdbccbfbf63cdea22046d6",
+          label: "money",
+          number: 1,
+          focused: true,
+          agent_status: "done",
+          pane_count: 1,
+        },
+      ],
+      panes: [
+        {
+          pane_id: "pf7b33a07abda79c075e93c65579ee5ee",
+          tab_id: "tb687ff508b103c6e1ee70bb55917be69a",
+          workspace_id: "sp903df98277bdbccbfbf63cdea22046d6",
+          focused: true,
+          agent: "claude",
+          agent_status: "done",
+          terminal_id: "t5",
+          status_msg: "relabeled income",
+          pinned: true,
+        },
+      ],
+      layouts: [
+        {
+          tab_id: "tb687ff508b103c6e1ee70bb55917be69a",
+          workspace_id: "sp903df98277bdbccbfbf63cdea22046d6",
+          area: { x: 0, y: 0, width: 100, height: 40 },
+          focused_pane_id: "pf7b33a07abda79c075e93c65579ee5ee",
+          zoomed: false,
+          panes: [
+            {
+              pane_id: "pf7b33a07abda79c075e93c65579ee5ee",
+              focused: true,
+              rect: { x: 0, y: 0, width: 100, height: 40 },
+            },
+          ],
+        },
+      ],
+      agents: [
+        {
+          pane_id: "pf7b33a07abda79c075e93c65579ee5ee",
+          tab_id: "tb687ff508b103c6e1ee70bb55917be69a",
+          workspace_id: "sp903df98277bdbccbfbf63cdea22046d6",
+          focused: true,
+          agent: "claude",
+          agent_status: "done",
+          terminal_id: "t5",
+          status_msg: "relabeled income",
+          pinned: true,
+        },
+      ],
+    };
+
+    const get = vi.fn(async () => ({
+      data: { available: true, snapshot: hcSnapshot },
+    }));
+    rendered = await renderWithApp(plugin, {
+      manifest,
+      locales,
+      api: { get, post, put: vi.fn(), delete: vi.fn() } as never,
+    });
+    rendered.app.registerComponent(
+      "terminal.view",
+      terminal.FakeTerminal as never,
+    );
+    rendered.renderTab("herdr", {
+      host,
+      isVisible: true,
+      tab: { id: "t", type: "herdr", label: "" },
+    });
+
+    await waitFor(() =>
+      expect(terminal.props.at(-1)).toMatchObject({
+        executeCommand: "hc attach t5",
+      }),
+    );
+
+    fireEvent.click(await screen.findByLabelText(locales.toolbar.navigator));
+    expect(await screen.findByText(/relabeled income/)).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText(locales.navigator.unpinAgent));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith("/hosts/7/actions", {
+        action: "agent.pin",
+        params: {
+          paneId: "pf7b33a07abda79c075e93c65579ee5ee",
+          pinned: false,
+        },
+      }),
+    );
+  });
 });

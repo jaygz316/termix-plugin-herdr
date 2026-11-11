@@ -196,6 +196,12 @@ export function KeyBar({
         <BarButton label={t("keys.ctrlL")} onPress={() => key("ctrlL")}>
           ^L
         </BarButton>
+        <BarButton
+          label={t("keys.ctrlBackslash")}
+          onPress={() => key("ctrlBackslash")}
+        >
+          ^\
+        </BarButton>
       </div>
       {latched ? (
         <div className="flex items-center gap-2 px-1">

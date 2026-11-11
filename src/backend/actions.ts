@@ -258,7 +258,20 @@ const builders: Record<string, (params: Params) => HerdrAction> = {
   "pane.sendText": (p) => cli("pane", "send-text", pane(p), text(p, "text")),
   "pane.sendKeys": (p) => cli("pane", "send-keys", pane(p), ...keys(p)),
   "pane.run": (p) => cli("pane", "run", pane(p), text(p, "command")),
+  "pane.interrupt": (p) => cli("pane", "send-keys", pane(p), "ctrl+c"),
   "agent.prompt": (p) => cli("agent", "prompt", pane(p), text(p, "text")),
+  "agent.pin": (p) => {
+    const id = pane(p);
+    if (typeof p.pinned !== "boolean") {
+      throw new ActionError("pinned must be a boolean");
+    }
+    return cli(
+      "pane",
+      "label",
+      id,
+      p.pinned ? "herdr.pinned=true" : "herdr.pinned=",
+    );
+  },
   "agent.start": (p) => {
     const id = pane(p);
     const kind = agentKind(p);

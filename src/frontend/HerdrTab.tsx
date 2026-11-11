@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import type {
   AgentStatus,
+  HerdrRuntime,
   HerdrSessionInfo,
   HerdrSnapshot,
   HerdrState,
@@ -93,6 +94,39 @@ function newInstanceId(): string {
     : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
+function resolveFocusTerminalId(
+  snapshot: HerdrSnapshot | null,
+  action: ActionName,
+  params?: Record<string, unknown>,
+): string | null {
+  if (!snapshot) return null;
+  if (action === "pane.focus") {
+    const paneId = typeof params?.paneId === "string" ? params.paneId : "";
+    const pane =
+      snapshot.panes.find((p) => p.pane_id === paneId) ??
+      snapshot.agents.find((a) => a.pane_id === paneId);
+    return pane?.terminal_id ?? (paneId || null);
+  }
+  if (action === "tab.focus") {
+    const tabId = typeof params?.tabId === "string" ? params.tabId : "";
+    const layout = snapshot.layouts.find((l) => l.tab_id === tabId);
+    const pane =
+      snapshot.panes.find((p) => p.pane_id === layout?.focused_pane_id) ??
+      snapshot.panes.find((p) => p.tab_id === tabId);
+    return pane?.terminal_id ?? null;
+  }
+  if (action === "workspace.focus") {
+    const wsId =
+      typeof params?.workspaceId === "string" ? params.workspaceId : "";
+    const ws = snapshot.workspaces.find((w) => w.workspace_id === wsId);
+    const pane =
+      snapshot.panes.find((p) => p.tab_id === ws?.active_tab_id && p.focused) ??
+      snapshot.panes.find((p) => p.workspace_id === wsId);
+    return pane?.terminal_id ?? null;
+  }
+  return null;
+}
+
 /**
  * herdr on one host: the real herdr TUI in Termix's own SSH terminal, with a
  * touch layer that speaks mouse to it, a key bar, and a navigator driven by
@@ -113,6 +147,15 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
     undefined,
   );
   const [sessions, setSessions] = useState<HerdrSessionInfo[]>([]);
+  const [runtime, setRuntime] = useState<HerdrRuntime | undefined>(undefined);
+  const [attachedTerminalId, setAttachedTerminalId] = useState<string | null>(
+    null,
+  );
+  const runtimeRef = useRef<HerdrRuntime | undefined>(undefined);
+  const attachedTerminalRef = useRef<string | null>(null);
+  runtimeRef.current = runtime;
+  attachedTerminalRef.current = attachedTerminalId;
+
   const configuredSession = herdrSessionName(host);
   const activeSession =
     sessionOverride !== undefined
@@ -123,7 +166,10 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
     () => herdrApi(pluginApi, hostId, sessionOverride),
     [pluginApi, hostId, sessionOverride],
   );
-  const launch = herdrLaunchCommand(host, sessionOverride);
+  const launch = herdrLaunchCommand(host, sessionOverride, {
+    runtime,
+    terminalId: attachedTerminalId,
+  });
 
   const touchSetting = String(userSettings.touchMouse ?? "auto");
   const keyBarSetting = String(userSettings.showKeyBar ?? "auto");
@@ -214,6 +260,16 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
     try {
       const nextState = await api.state();
       if (nextState.available) {
+        if (
+          nextState.snapshot.runtime === "hc" &&
+          runtimeRef.current !== "hc"
+        ) {
+          const initialTerm = nextState.snapshot.focused_terminal_id ?? null;
+          setRuntime("hc");
+          setAttachedTerminalId(initialTerm);
+          setHandle(null);
+          setInstanceId(newInstanceId());
+        }
         const prev = prevAgentStatusRef.current;
         const nextMap = new Map<string, AgentStatus>();
         for (const agent of nextState.snapshot.agents) {
@@ -230,6 +286,8 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
                 toast.warning(
                   t("notifications.agentBlocked", { name, workspace }),
                 );
+              } else if (agent.agent_status === "error") {
+                toast.error(t("notifications.agentError", { name, workspace }));
               } else if (
                 agent.agent_status === "done" &&
                 (oldStatus === "working" || oldStatus === "blocked") &&
@@ -297,7 +355,16 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   const run = useCallback(
     async (action: ActionName, params?: Record<string, unknown>) => {
       try {
+        const nextTerm =
+          runtimeRef.current === "hc"
+            ? resolveFocusTerminalId(snapshotRef.current, action, params)
+            : null;
         await api.action(action, params);
+        if (nextTerm && nextTerm !== attachedTerminalRef.current) {
+          setAttachedTerminalId(nextTerm);
+          setHandle(null);
+          setInstanceId(newInstanceId());
+        }
         void refresh();
         return true;
       } catch (err) {
@@ -420,7 +487,8 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   const snapshot = snapshotRef.current;
   const failure = failureOf(state);
   const waiting = snapshot?.agents.filter(
-    (agent) => agent.agent_status === "blocked",
+    (agent) =>
+      agent.agent_status === "blocked" || agent.agent_status === "error",
   ).length;
   const layerActive = touchOn && mouseWanted && Boolean(handle);
 

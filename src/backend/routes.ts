@@ -5,6 +5,7 @@ import type {
 } from "@termix-ssh/plugin-sdk/backend";
 import {
   HOST_SETTINGS,
+  isHcBinaryName,
   isPaneId,
   normalizeBinary,
   normalizeSession,
@@ -14,6 +15,15 @@ import {
   type HerdrState,
 } from "../shared/herdr.js";
 import { ActionError, buildAction, readLines } from "./actions.js";
+import {
+  buildSessionsScript,
+  executeHcAction,
+  isLegacyEntityId,
+  readHcPaneOutput,
+  readHostSnapshot,
+  shouldUseHcForAction,
+} from "./hc-actions.js";
+import { HC_STATE_MARKER, buildStateScript } from "./hc-snapshot.js";
 import {
   HerdrCommandError,
   SOCKET_UNAVAILABLE,
@@ -118,16 +128,7 @@ async function readSnapshot(
   client: SshClientLike,
   target: HerdrTarget,
 ): Promise<HerdrSnapshot> {
-  const result = (await runHerdr(client, target, ["api", "snapshot"])) as {
-    snapshot?: HerdrSnapshot;
-  };
-  if (!result?.snapshot || !Array.isArray(result.snapshot.workspaces)) {
-    throw new HerdrCommandError(
-      "herdr returned an unexpected snapshot",
-      "HERDR_ERROR",
-    );
-  }
-  return result.snapshot;
+  return readHostSnapshot(client, target);
 }
 
 function parseSessionList(
@@ -328,10 +329,7 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
     try {
       const raw = await withClient(ctx, target, async (client) =>
         parseHerdrResult(
-          await runScript(
-            client,
-            buildScript(target.binary, "", ["session", "list", "--json"]),
-          ),
+          await runScript(client, buildSessionsScript(target.binary)),
         ),
       );
       res.json({
@@ -351,8 +349,8 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
    *     description: >-
    *       Focus, create, rename and close workspaces, worktrees and tabs; focus,
    *       rename, split, resize, swap, zoom and close panes; send text or keys
-   *       to a pane; start or prompt an agent. Only the listed actions are
-   *       accepted and every id is validated.
+   *       to a pane; interrupt a pane; start, pin or prompt an agent. Only the
+   *       listed actions are accepted and every id is validated.
    *     tags:
    *       - Herdr
    *     parameters:
@@ -393,7 +391,9 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
    *                   - pane.sendText
    *                   - pane.sendKeys
    *                   - pane.run
+   *                   - pane.interrupt
    *                   - agent.prompt
+   *                   - agent.pin
    *                   - agent.start
    *               params:
    *                 type: object
@@ -416,6 +416,13 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
    *         description: The host could not be reached
    */
   router.post("/hosts/:hostId/actions", async (req: Request, res: Response) => {
+    const actionName = String(req.body?.action ?? "");
+    const rawParams =
+      req.body?.params &&
+      typeof req.body.params === "object" &&
+      !Array.isArray(req.body.params)
+        ? (req.body.params as Record<string, unknown>)
+        : {};
     let action;
     try {
       action = buildAction(req.body?.action, req.body?.params);
@@ -426,11 +433,26 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
     const target = await requireTarget(ctx, req, res);
     if (!target) return;
     try {
-      const result = await withClient(ctx, target, (client) =>
-        action.kind === "focusPane"
+      const result = await withClient(ctx, target, async (client) => {
+        if (shouldUseHcForAction(target.binary, actionName, rawParams)) {
+          return executeHcAction(client, target, actionName, rawParams);
+        }
+        if (
+          actionName === "workspace.create" &&
+          !isHcBinaryName(target.binary)
+        ) {
+          const probe = await runScript(
+            client,
+            buildStateScript(target.binary, target.session),
+          );
+          if (probe.stdout.startsWith(HC_STATE_MARKER)) {
+            return executeHcAction(client, target, actionName, rawParams);
+          }
+        }
+        return action.kind === "focusPane"
           ? focusPane(client, target, action.paneId)
-          : runHerdr(client, target, action.args),
-      );
+          : runHerdr(client, target, action.args);
+      });
       res.json({ result });
     } catch (err) {
       sendActionError(res, err);
@@ -488,6 +510,14 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
       const target = await requireTarget(ctx, req, res);
       if (!target) return;
       try {
+        const lines = readLines(req.query.lines);
+        if (isHcBinaryName(target.binary) || !isLegacyEntityId(paneId)) {
+          const text = await withClient(ctx, target, (client) =>
+            readHcPaneOutput(client, target, paneId, lines),
+          );
+          res.json({ text });
+          return;
+        }
         // pane read prints the text itself, not JSON.
         const result = await withClient(ctx, target, (client) =>
           runScript(
@@ -499,7 +529,7 @@ export function registerRoutes(router: Router, ctx: PluginContext): void {
               "--source",
               "recent-unwrapped",
               "--lines",
-              String(readLines(req.query.lines)),
+              String(lines),
             ]),
           ),
         );

@@ -1,8 +1,8 @@
-Herdr opens [herdr](https://herdr.dev), the terminal workspace manager for coding agents, on any SSH host in Termix and makes it work with touch. Taps become mouse clicks, a key bar adds the keys phone keyboards lack, and a navigator lists every workspace, git worktree, tab, pane and agent.
+Herdr opens [herdr](https://herdr.dev), the terminal workspace manager for coding agents, on any SSH host in Termix and makes it work with touch. It supports both the new `herdr-core` (`hc`) and `herdr-app` runtime and legacy `herdr`. Taps become mouse clicks, a key bar adds the keys phone keyboards lack, and a navigator lists every workspace, git worktree, tab, pane and agent.
 
 ## Turn it on
 
-1. Install herdr on the host. Herdr looks for it on `PATH` and in `~/.local/bin`, `~/.cargo/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin`.
+1. Install `hc` (`herdr-core`) and `herdr-app` (or legacy `herdr`) on the host. Herdr looks for `hc`, `herdr-core` and `herdr` on `PATH` and in `~/.local/bin`, `~/.cargo/bin`, `~/bin`, `/usr/local/bin` and `/opt/homebrew/bin`.
 2. Install Herdr from the Plugins tab. It needs the SSH Terminal plugin, which Termix ships with.
 3. Press the robot button on a host, or choose Open in Herdr in the host's menu or the command palette.
 

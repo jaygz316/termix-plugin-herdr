@@ -204,7 +204,8 @@ export type BarKey =
   | "ctrlC"
   | "ctrlD"
   | "ctrlZ"
-  | "ctrlL";
+  | "ctrlL"
+  | "ctrlBackslash";
 
 export interface Modifiers {
   ctrl: boolean;
@@ -264,6 +265,8 @@ export function keyBytes(
       return alt + "\x1a";
     case "ctrlL":
       return alt + "\x0c";
+    case "ctrlBackslash":
+      return alt + "\x1c";
     default:
       return "";
   }

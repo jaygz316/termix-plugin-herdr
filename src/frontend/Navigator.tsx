@@ -24,7 +24,10 @@ import {
   FolderPlus,
   GitBranch,
   Maximize2,
+  OctagonX,
   Pencil,
+  Pin,
+  PinOff,
   Plus,
   RotateCw,
   SquareSplitHorizontal,
@@ -83,10 +86,11 @@ const APPROVAL_KEYS: Array<{ label: string; keys: string[] }> = [
 
 const STATUS_TONE: Record<
   AgentStatus,
-  "brand" | "warning" | "success" | "muted"
+  "brand" | "warning" | "destructive" | "success" | "muted"
 > = {
   working: "brand",
   blocked: "warning",
+  error: "destructive",
   done: "success",
   idle: "muted",
   unknown: "muted",
@@ -296,7 +300,10 @@ export function Navigator({
   );
   const attention = snapshot.agents.filter(
     (agent) =>
-      agent.agent_status === "blocked" || agent.agent_status === "done",
+      agent.agent_status === "blocked" ||
+      agent.agent_status === "error" ||
+      agent.agent_status === "done" ||
+      agent.pinned,
   );
   const workspaces = [...snapshot.workspaces].sort(
     (a, b) => a.number - b.number,
@@ -480,8 +487,18 @@ export function Navigator({
               <ListRow
                 icon={<Bot className="size-4" />}
                 title={paneName(agent, agent.pane_id)}
-                meta={workspaceLabel.get(agent.workspace_id)}
-                tone={agent.agent_status === "blocked" ? "warning" : "success"}
+                meta={
+                  agent.status_msg
+                    ? `${workspaceLabel.get(agent.workspace_id) ?? agent.workspace_id} · ${agent.status_msg}`
+                    : workspaceLabel.get(agent.workspace_id)
+                }
+                tone={
+                  agent.agent_status === "blocked"
+                    ? "warning"
+                    : agent.agent_status === "error"
+                      ? "destructive"
+                      : "success"
+                }
                 badges={<StatusBadge status={agent.agent_status} />}
                 onClick={() => {
                   if (agent.focused && onCloseNavigator) {
@@ -490,6 +507,39 @@ export function Navigator({
                   }
                   void run("pane.focus", { paneId: agent.pane_id });
                 }}
+                actions={
+                  <>
+                    <ListRowAction
+                      label={t(
+                        agent.pinned
+                          ? "navigator.unpinAgent"
+                          : "navigator.pinAgent",
+                      )}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void run("agent.pin", {
+                          paneId: agent.pane_id,
+                          pinned: !agent.pinned,
+                        });
+                      }}
+                    >
+                      {agent.pinned ? (
+                        <PinOff className="size-3.5" />
+                      ) : (
+                        <Pin className="size-3.5" />
+                      )}
+                    </ListRowAction>
+                    <ListRowAction
+                      label={t("navigator.interruptPane")}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void run("pane.interrupt", { paneId: agent.pane_id });
+                      }}
+                    >
+                      <OctagonX className="size-3.5" />
+                    </ListRowAction>
+                  </>
+                }
               />
               {agent.agent_status === "blocked" && (
                 <div

@@ -149,6 +149,41 @@ describe("buildAction", () => {
       kind: "cli",
       args: ["agent", "start", "claude", "--kind", "claude", "--pane", "w1:p1"],
     });
+    expect(
+      buildAction("pane.interrupt", {
+        paneId: "pf7b33a07abda79c075e93c65579ee5ee",
+      }),
+    ).toEqual({
+      kind: "cli",
+      args: [
+        "pane",
+        "send-keys",
+        "pf7b33a07abda79c075e93c65579ee5ee",
+        "ctrl+c",
+      ],
+    });
+    expect(
+      buildAction("agent.pin", { paneId: "ucloud/t4", pinned: true }),
+    ).toEqual({
+      kind: "cli",
+      args: ["pane", "label", "ucloud/t4", "herdr.pinned=true"],
+    });
+    expect(
+      buildAction("workspace.focus", {
+        workspaceId: "sp903df98277bdbccbfbf63cdea22046d6",
+      }),
+    ).toEqual({
+      kind: "cli",
+      args: ["workspace", "focus", "sp903df98277bdbccbfbf63cdea22046d6"],
+    });
+    expect(
+      buildAction("tab.focus", {
+        tabId: "tb687ff508b103c6e1ee70bb55917be69a",
+      }),
+    ).toEqual({
+      kind: "cli",
+      args: ["tab", "focus", "tb687ff508b103c6e1ee70bb55917be69a"],
+    });
   });
 
   it("refuses unknown actions and bad ids", () => {

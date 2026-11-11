@@ -1,5 +1,5 @@
 import { StringDecoder } from "node:string_decoder";
-import type { HerdrErrorCode } from "../shared/herdr.js";
+import { isHcBinaryName, type HerdrErrorCode } from "../shared/herdr.js";
 
 /** The parts of an ssh2 Client this plugin uses. */
 export interface SshClientLike {
@@ -36,11 +36,11 @@ export function shQuote(value: string): string {
 
 // Non-interactive SSH sessions often skip the profile that puts ~/.local/bin
 // (herdr's install location) on PATH, so add the usual places.
-const PREAMBLE = [
+export const PREAMBLE = [
   'PATH="$HOME/.local/bin:$HOME/.cargo/bin:$HOME/bin:/usr/local/bin:/opt/homebrew/bin:$PATH"',
   "export PATH",
   // Never let a herdr pane's caller context leak into our commands.
-  "unset HERDR_ENV HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID",
+  "unset HERDR_ENV HERDR_PANE_ID HERDR_TAB_ID HERDR_WORKSPACE_ID HC_TERMINAL_ID",
 ];
 
 function binaryAssignment(binary: string): string {
@@ -62,6 +62,20 @@ function scriptHead(binary: string): string[] {
   ];
 }
 
+export function hcScriptHead(binary: string, session: string): string[] {
+  const assign = isHcBinaryName(binary)
+    ? binaryAssignment(binary)
+    : 'if command -v hc >/dev/null 2>&1; then H=hc; elif command -v herdr-core >/dev/null 2>&1; then H=herdr-core; else H=""; fi';
+  return [
+    ...PREAMBLE,
+    ...(session
+      ? [`HC_SESSION=${shQuote(session)}`, "export HC_SESSION"]
+      : ["unset HC_SESSION"]),
+    assign,
+    `[ -n "$H" ] && command -v "$H" >/dev/null 2>&1 || { echo ${NOT_FOUND_MARK} >&2; exit 127; }`,
+  ];
+}
+
 /**
  * A POSIX sh script that runs one herdr CLI command. It is sent on stdin to
  * `sh -s`, so the login shell (bash, zsh, fish) never parses our quoting.
@@ -74,6 +88,54 @@ export function buildScript(
   return [
     ...scriptHead(binary),
     `exec ${herdrPrefix(session)} ${args.map(shQuote).join(" ")}`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * A POSIX sh script that runs one herdr-core (hc) CLI command with HC_SESSION
+ * set when a non-default session is chosen.
+ */
+export function buildHcScript(
+  binary: string,
+  session: string,
+  args: string[],
+): string {
+  return [
+    ...hcScriptHead(binary, session),
+    `exec "$H" ${args.map(shQuote).join(" ")}`,
+    "",
+  ].join("\n");
+}
+
+/**
+ * A POSIX sh script that pipes one or more JSON-RPC 2.0 requests into
+ * `hc connect` on stdin and prints the newline-delimited JSON-RPC replies.
+ */
+export function buildHcRpcScript(
+  binary: string,
+  session: string,
+  requests: Array<{
+    id: number | string;
+    method: string;
+    params?: Record<string, unknown>;
+  }>,
+  extraAfter?: string[],
+): string {
+  const lines = requests.map((req) =>
+    shQuote(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: req.id,
+        method: req.method,
+        params: req.params ?? {},
+      }),
+    ),
+  );
+  return [
+    ...hcScriptHead(binary, session),
+    `printf '%s\\n' ${lines.join(" ")} | "$H" connect`,
+    ...(extraAfter ?? []),
     "",
   ].join("\n");
 }
@@ -227,9 +289,26 @@ function parseErrorJson(
     if (!trimmed.startsWith("{")) continue;
     try {
       const parsed = JSON.parse(trimmed) as {
-        error?: { code?: string; message?: string };
+        error?: {
+          code?: string | number;
+          kind?: string;
+          message?: string;
+          data?: { kind?: string };
+        };
       };
-      if (parsed.error) return parsed.error;
+      if (parsed.error) {
+        const rawCode =
+          parsed.error.kind ??
+          parsed.error.data?.kind ??
+          (typeof parsed.error.code === "string"
+            ? parsed.error.code
+            : undefined);
+        const code = rawCode === "blocked" ? "agent_blocked" : rawCode;
+        return {
+          code,
+          message: parsed.error.message,
+        };
+      }
     } catch {
       // Not JSON; keep looking.
     }

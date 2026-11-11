@@ -12,11 +12,24 @@ export const HOST_SETTINGS = {
 
 export const DEFAULT_BINARY = "herdr";
 
-// herdr ids are opaque but always look like w1, w1:t1 and w1:p1, with the
-// workspace part being letters and digits (w1Z, w14).
-const WORKSPACE_RE = /^w[0-9A-Za-z]{1,16}$/;
-const TAB_RE = /^w[0-9A-Za-z]{1,16}:t[0-9A-Za-z]{1,16}$/;
-const PANE_RE = /^w[0-9A-Za-z]{1,16}:p[0-9A-Za-z]{1,16}$/;
+export type HerdrRuntime = "hc" | "legacy";
+
+// Legacy herdr ids look like w1, w1:t1 and w1:p1; new herdr-core (hc) /
+// herdr-app ids look like sp<hex>, tb<hex>, p<hex>, t<base36> (or a terminal
+// name), with an optional `<machine>/` prefix for linked remote machines.
+const MACHINE_PREFIX = "(?:[A-Za-z0-9_.-]{1,32}/)?";
+const WORKSPACE_RE = new RegExp(
+  `^${MACHINE_PREFIX}(?:w[0-9A-Za-z]{1,16}|sp[0-9a-f]{8,64}|space-[0-9A-Za-z_-]{1,32})$`,
+);
+const TAB_RE = new RegExp(
+  `^${MACHINE_PREFIX}(?:w[0-9A-Za-z]{1,16}:t[0-9A-Za-z]{1,16}|tb[0-9a-f]{8,64}|tab-[0-9A-Za-z_-]{1,32})$`,
+);
+const PANE_RE = new RegExp(
+  `^${MACHINE_PREFIX}(?:w[0-9A-Za-z]{1,16}:p[0-9A-Za-z]{1,16}|p[0-9a-f]{8,64}|pane-[0-9A-Za-z_-]{1,32}|t[0-9a-z]{1,16})$`,
+);
+const TERMINAL_RE = new RegExp(
+  `^${MACHINE_PREFIX}(?:t[0-9a-z]{1,16}|[a-z0-9][a-z0-9_-]{0,31})$`,
+);
 // Typed into a shell and passed to sh unquoted, so keep it to characters no
 // shell treats specially. A leading ~/ is expanded by the caller.
 const BINARY_RE = /^~?[A-Za-z0-9_./+-]{1,255}$/;
@@ -28,6 +41,14 @@ export const isTabId = (value: unknown): value is string =>
   typeof value === "string" && TAB_RE.test(value);
 export const isPaneId = (value: unknown): value is string =>
   typeof value === "string" && PANE_RE.test(value);
+export const isTerminalId = (value: unknown): value is string =>
+  typeof value === "string" && TERMINAL_RE.test(value);
+
+/** Whether a configured binary path points straight to herdr-core (hc). */
+export function isHcBinaryName(binary: string): boolean {
+  const base = binary.split("/").pop() ?? binary;
+  return base === "hc" || base === "herdr-core";
+}
 
 /** The herdr binary to run, or null when the setting is unusable. */
 export function normalizeBinary(value: unknown): string | null {
@@ -45,12 +66,35 @@ export function normalizeSession(value: unknown): string | null {
   return SESSION_RE.test(session) ? session : null;
 }
 
+export interface LaunchOptions {
+  runtime?: HerdrRuntime;
+  terminalId?: string | null;
+}
+
 /**
  * The command typed into the host's interactive shell to start or attach the
- * herdr client. Both parts are validated to contain nothing a shell expands,
+ * herdr client. All parts are validated to contain nothing a shell expands,
  * so it is the same in bash, zsh and fish.
  */
-export function launchCommand(binary: string, session: string): string {
+export function launchCommand(
+  binary: string,
+  session: string,
+  options?: LaunchOptions,
+): string {
+  const runtime =
+    options?.runtime ?? (isHcBinaryName(binary) ? "hc" : undefined);
+  const terminalId =
+    options?.terminalId && isTerminalId(options.terminalId)
+      ? options.terminalId
+      : null;
+
+  if (runtime === "hc") {
+    const hcCmd = isHcBinaryName(binary) ? binary : "hc";
+    const envPrefix = session ? `env HC_SESSION=${session} ` : "";
+    return terminalId
+      ? `${envPrefix}${hcCmd} attach ${terminalId}`
+      : `${envPrefix}${hcCmd}`;
+  }
   return session ? `${binary} --session ${session}` : binary;
 }
 
@@ -83,7 +127,8 @@ export const SUPPORTED_AGENT_KINDS = [
 
 export type AgentKind = (typeof SUPPORTED_AGENT_KINDS)[number];
 
-export type AgentStatus = "idle" | "working" | "blocked" | "done" | "unknown";
+export type AgentStatus =
+  "idle" | "working" | "blocked" | "done" | "error" | "unknown";
 
 export interface HerdrRect {
   x: number;
@@ -101,6 +146,8 @@ export interface HerdrWorkspace {
   agent_status: AgentStatus;
   pane_count: number;
   tab_count: number;
+  machine?: string | null;
+  folder?: string;
   worktree?: {
     branch?: string;
     path?: string;
@@ -129,6 +176,20 @@ export interface HerdrPane {
   foreground_cwd?: string;
   label?: string;
   terminal_title_stripped?: string;
+  /** herdr-core (hc) terminal address, e.g. "t18" or "ucloud/t4". */
+  terminal_id?: string;
+  /** Rich status message reported by the agent via OSC 7501. */
+  status_msg?: string | null;
+  /** Pinned in the Herdr agents list (`herdr.pinned` label). */
+  pinned?: boolean;
+  /** Parent terminal address when this agent is a sub-agent. */
+  parent_id?: string | null;
+  /** Machine name when the terminal runs on a linked remote machine. */
+  machine?: string | null;
+  /** Current agent turn counter. */
+  turn?: number;
+  /** True when the agent finished or blocked since the user last looked. */
+  unseen?: boolean;
 }
 
 export interface HerdrLayout {
@@ -140,17 +201,28 @@ export interface HerdrLayout {
   panes: { pane_id: string; focused: boolean; rect: HerdrRect }[];
 }
 
+export interface HerdrMachineInfo {
+  name: string;
+  target?: string;
+  state?: string;
+  version?: string | null;
+  why?: string | null;
+}
+
 export interface HerdrSnapshot {
   version: string;
   protocol: number;
+  runtime?: HerdrRuntime;
   focused_workspace_id: string | null;
   focused_tab_id: string | null;
   focused_pane_id: string | null;
+  focused_terminal_id?: string | null;
   workspaces: HerdrWorkspace[];
   tabs: HerdrTab[];
   panes: HerdrPane[];
   layouts: HerdrLayout[];
   agents: HerdrPane[];
+  machines?: HerdrMachineInfo[];
 }
 
 export interface HerdrSessionInfo {

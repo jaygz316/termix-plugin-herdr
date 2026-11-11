@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+
+- Support for the new `herdr-core` (`hc`) and `herdr-app` architecture alongside legacy `herdr`
+- Snapshot synthesis from `hc connect` (`server.status`, `terminal.list`, `doc.get("herdr-app")`) and `~/.config/herdr-app/view.json`, including linked remote machines (`<machine>/<terminal>`) and sub-agents
+- Direct terminal attachment (`hc attach <terminal>`) in the embedded SSH terminal when connected to an `hc` host, switching terminals automatically when focusing workspaces, tabs, panes or agents in the navigator
+- Agent pin and unpin (`agent.pin` / `herdr.pinned`), pane interrupt (`pane.interrupt`), OSC 7501 status messages (`status_msg`) and `error` status badges in the navigator
+- A `^\` (`Ctrl+\`) key on the key bar for detaching from `hc attach`
+
 ## 1.1.0
 
 ### Added

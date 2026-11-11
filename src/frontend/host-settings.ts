@@ -5,6 +5,7 @@ import {
   launchCommand,
   normalizeBinary,
   normalizeSession,
+  type LaunchOptions,
 } from "../shared/herdr";
 
 function settingsOf(
@@ -39,6 +40,7 @@ export function herdrSessionName(
 export function herdrLaunchCommand(
   host: PluginHostRecord | null | undefined,
   sessionOverride?: string,
+  options?: LaunchOptions,
 ): string | null {
   const settings = settingsOf(host);
   const binary = normalizeBinary(settings[HOST_SETTINGS.binary]);
@@ -48,5 +50,5 @@ export function herdrLaunchCommand(
       : settings[HOST_SETTINGS.session],
   );
   if (binary === null || session === null) return null;
-  return launchCommand(binary, session);
+  return launchCommand(binary, session, options);
 }

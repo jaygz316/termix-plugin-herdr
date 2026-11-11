@@ -22,7 +22,9 @@ export type ActionName =
   | "pane.sendText"
   | "pane.sendKeys"
   | "pane.run"
+  | "pane.interrupt"
   | "agent.prompt"
+  | "agent.pin"
   | "agent.start";
 
 export interface HerdrSessionsResponse {
