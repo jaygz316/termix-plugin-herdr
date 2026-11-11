@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.0
+
+### Added
+
+- Mouse-resizable left sidebar (`160px`–`480px`, drag below `110px` to snap into compact rail mode, drag rail edge to reopen, double-click to reset), mouse-resizable horizontal split between the Spaces and Agents lists, and mouse-resizable right Navigator inspector (`240px`–`560px`), all persisted in `localStorage`
+- Instant search / filter bar in the `herdr-app` sidebar header to filter Spaces, branches, machines and Agents in real time and press `Enter` to jump to the first match
+- Inline Quick Prompt / Command bar (`MessageSquare` button) and inline blocked-agent approval keys directly in the pane header bar above the terminal
+- Click-to-copy working directory (`cwd`) in the pane header bar, multi-tab count badges on Spaces, and one-click jump to the next waiting (`blocked` / `error`) agent from the bottom status bar
+
 ## 1.3.0
 
 ### Added

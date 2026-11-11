@@ -1,16 +1,19 @@
 import { useState } from "react";
-import { useTranslation } from "@termix-ssh/plugin-sdk/frontend";
+import { useToast, useTranslation } from "@termix-ssh/plugin-sdk/frontend";
 import { ListRowAction, cn, useConfirm } from "@termix-ssh/plugin-sdk/ui";
 import {
   Bot,
   Check,
+  Copy,
   FolderPlus,
   GitBranch,
   Maximize2,
+  MessageSquare,
   Monitor,
   OctagonX,
   PanelLeftOpen,
   Plus,
+  Send,
   Server,
   SquareSplitHorizontal,
   SquareSplitVertical,
@@ -36,6 +39,16 @@ const NEW_MENU_AGENTS: AgentKind[] = [
   "copilot",
   "cursor",
   "pi",
+];
+
+const INLINE_APPROVAL_KEYS: Array<{ label: string; keys: string[] }> = [
+  { label: "Enter", keys: ["enter"] },
+  { label: "y", keys: ["y", "enter"] },
+  { label: "n", keys: ["n", "enter"] },
+  { label: "Esc", keys: ["esc"] },
+  { label: "1", keys: ["1"] },
+  { label: "2", keys: ["2"] },
+  { label: "^C", keys: ["ctrl+c"] },
 ];
 
 function shortenPath(path: string | undefined): string {
@@ -78,8 +91,9 @@ interface HerdrAppTabBarProps {
 }
 
 /**
- * Top tab bar (`mods/tabs` + `mods/new-menu`) and focused pane header bar
- * (`mods/pane`) that sit directly above the terminal in `herdr-app` mode.
+ * Top tab bar (`mods/tabs` + `mods/new-menu`), focused pane header bar
+ * (`mods/pane`), and inline quick-prompt bar that sit directly above the
+ * terminal in `herdr-app` mode.
  */
 export function HerdrAppTabBar({
   snapshot,
@@ -88,10 +102,13 @@ export function HerdrAppTabBar({
   onExpandSidebar,
 }: HerdrAppTabBarProps) {
   const { t } = useTranslation();
+  const toast = useToast();
   const confirm = useConfirm();
   const [newMenuOpen, setNewMenuOpen] = useState(false);
   const [renamingTabId, setRenamingTabId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
+  const [quickPromptOpen, setQuickPromptOpen] = useState(false);
+  const [quickDraft, setQuickDraft] = useState("");
 
   const activeWsId =
     snapshot.focused_workspace_id ?? snapshot.workspaces[0]?.workspace_id;
@@ -141,9 +158,31 @@ export function HerdrAppTabBar({
     }
   }
 
-  const cwdText = shortenPath(
-    focusedPane?.foreground_cwd ?? focusedPane?.cwd ?? undefined,
-  );
+  const rawCwd = focusedPane?.foreground_cwd ?? focusedPane?.cwd ?? undefined;
+  const cwdText = shortenPath(rawCwd);
+
+  async function copyCwd() {
+    if (!rawCwd) return;
+    try {
+      await navigator.clipboard?.writeText(rawCwd);
+      toast.success(t("chrome.cwdCopied"));
+    } catch {
+      // Ignore clipboard errors in restricted contexts.
+    }
+  }
+
+  async function submitQuickPrompt() {
+    const text = quickDraft.trim();
+    if (!focusedPane || !text) return;
+    const isAgent =
+      Boolean(focusedPane.agent) && focusedPane.agent_status !== "blocked";
+    const ok = isAgent
+      ? await run("agent.prompt", { paneId: focusedPane.pane_id, text })
+      : await run("pane.run", { paneId: focusedPane.pane_id, command: text });
+    if (ok) {
+      setQuickDraft("");
+    }
+  }
 
   return (
     <div
@@ -378,13 +417,56 @@ export function HerdrAppTabBar({
             )}
 
             {cwdText && (
-              <span className="truncate font-mono text-muted-foreground">
-                {cwdText}
-              </span>
+              <button
+                type="button"
+                title={t("chrome.copyCwd")}
+                onClick={() => void copyCwd()}
+                className="group flex items-center gap-1 truncate rounded px-1 py-0.5 font-mono text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <span className="truncate">{cwdText}</span>
+                <Copy className="hidden size-2.5 shrink-0 group-hover:inline" />
+              </button>
+            )}
+
+            {/* Inline one-tap approval keys right in the pane header when blocked */}
+            {focusedPane.agent_status === "blocked" && (
+              <div className="flex items-center gap-1 overflow-x-auto">
+                <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-400">
+                  {t("chrome.needsYou")}
+                </span>
+                {INLINE_APPROVAL_KEYS.map((item) => (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() =>
+                      void run("pane.sendKeys", {
+                        paneId: focusedPane.pane_id,
+                        keys: item.keys,
+                      })
+                    }
+                    className="h-5 rounded border border-border bg-background px-1.5 text-[10px] hover:bg-muted"
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
             )}
           </div>
 
           <div className="flex shrink-0 items-center gap-0.5">
+            <button
+              type="button"
+              title={t("chrome.quickPrompt")}
+              onClick={() => setQuickPromptOpen((open) => !open)}
+              className={cn(
+                "rounded p-1 hover:bg-muted",
+                quickPromptOpen
+                  ? "text-accent-brand"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              <MessageSquare className="size-3" />
+            </button>
             <button
               type="button"
               title={t("actions.splitRight")}
@@ -449,22 +531,64 @@ export function HerdrAppTabBar({
           </div>
         </div>
       )}
+
+      {/* Inline Quick Prompt / Command bar */}
+      {quickPromptOpen && focusedPane && (
+        <form
+          className="flex h-8 items-center gap-1.5 border-t border-border/60 bg-background px-2.5"
+          data-testid="herdr-quick-prompt-bar"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void submitQuickPrompt();
+          }}
+        >
+          <input
+            autoFocus
+            placeholder={
+              focusedPane.agent && focusedPane.agent_status !== "blocked"
+                ? t("navigator.promptPlaceholder")
+                : t("navigator.textPlaceholder")
+            }
+            value={quickDraft}
+            onChange={(e) => setQuickDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setQuickPromptOpen(false);
+            }}
+            className="h-6 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+          />
+          <button
+            type="submit"
+            disabled={!quickDraft.trim()}
+            className="flex h-6 items-center gap-1 rounded bg-accent-brand/20 px-2 text-[11px] font-medium text-accent-brand hover:bg-accent-brand/30 disabled:opacity-40"
+          >
+            <Send className="size-2.5" />
+            <span>
+              {focusedPane.agent && focusedPane.agent_status !== "blocked"
+                ? t("navigator.prompt")
+                : t("navigator.run")}
+            </span>
+          </button>
+        </form>
+      )}
     </div>
   );
 }
 
 interface HerdrAppStatusBarProps {
   snapshot: HerdrSnapshot;
+  run: RunAction;
   sessions: HerdrSessionInfo[];
   activeSession: string;
   onSelectSession: (session: string) => void;
 }
 
 /**
- * Bottom status bar mirroring `herdr-app` `mods/workspace-status/main.js`.
+ * Bottom status bar mirroring `herdr-app` `mods/workspace-status/main.js`,
+ * with one-click jump to the next waiting (`blocked` / `error`) agent.
  */
 export function HerdrAppStatusBar({
   snapshot,
+  run,
   sessions,
   activeSession,
   onSelectSession,
@@ -481,9 +605,21 @@ export function HerdrAppStatusBar({
   const branch = focusedWs?.worktree?.branch;
 
   const totalAgents = snapshot.agents.length;
-  const needsYouCount = snapshot.agents.filter(
+  const waitingAgents = snapshot.agents.filter(
     (a) => a.agent_status === "blocked" || a.agent_status === "error",
-  ).length;
+  );
+  const needsYouCount = waitingAgents.length;
+
+  function jumpToNextWaitingAgent() {
+    if (waitingAgents.length === 0) return;
+    const currentIdx = waitingAgents.findIndex(
+      (a) => a.pane_id === snapshot.focused_pane_id,
+    );
+    const next = waitingAgents[(currentIdx + 1) % waitingAgents.length];
+    if (next) {
+      void run("pane.focus", { paneId: next.pane_id });
+    }
+  }
 
   return (
     <div
@@ -537,12 +673,17 @@ export function HerdrAppStatusBar({
           </div>
         )}
 
-        <span>
-          {t("chrome.agentCount", { count: totalAgents })}
+        <span className="flex items-center gap-1">
+          <span>{t("chrome.agentCount", { count: totalAgents })}</span>
           {needsYouCount > 0 && (
-            <span className="ml-1 font-medium text-amber-400">
-              · {t("chrome.needsYouCount", { count: needsYouCount })}
-            </span>
+            <button
+              type="button"
+              title={t("chrome.jumpNeedsYou")}
+              onClick={jumpToNextWaitingAgent}
+              className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 hover:bg-amber-500/30"
+            >
+              {t("chrome.needsYouCount", { count: needsYouCount })}
+            </button>
           )}
         </span>
       </div>

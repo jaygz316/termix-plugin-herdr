@@ -419,9 +419,21 @@ describe("herdr activate", () => {
 
     // The native herdr-app chrome (left sidebar, top tab bar, bottom status bar)
     // renders automatically around the terminal on hc hosts.
-    expect(screen.getByTestId("herdr-app-sidebar")).toBeTruthy();
+    const sidebar = screen.getByTestId("herdr-app-sidebar");
+    expect(sidebar).toBeTruthy();
     expect(screen.getByTestId("herdr-app-tabbar")).toBeTruthy();
     expect(screen.getByTestId("herdr-app-statusbar")).toBeTruthy();
+    expect(screen.getByTestId("herdr-sidebar-resize-handle")).toBeTruthy();
+    expect(screen.getByTestId("herdr-sidebar-split-handle")).toBeTruthy();
+
+    // Dragging the sidebar resize handle updates its width, and double-click resets it.
+    const resizeHandle = screen.getByTestId("herdr-sidebar-resize-handle");
+    fireEvent.mouseDown(resizeHandle, { clientX: 240 });
+    fireEvent.mouseMove(window, { clientX: 310 });
+    fireEvent.mouseUp(window);
+    expect(sidebar.getAttribute("style")).toContain("310px");
+    fireEvent.doubleClick(resizeHandle);
+    expect(sidebar.getAttribute("style")).toContain("240px");
 
     // Collapsing the sidebar switches to the compact numbered rail.
     fireEvent.click(screen.getByLabelText(locales.toolbar.sidebarCollapse));

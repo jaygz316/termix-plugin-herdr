@@ -74,6 +74,10 @@ interface TerminalHandleLike {
 
 const POLL_OPEN_MS = 2500;
 const POLL_CLOSED_MS = 8000;
+const DEFAULT_NAVIGATOR_WIDTH = 320;
+const MIN_NAVIGATOR_WIDTH = 240;
+const MAX_NAVIGATOR_WIDTH = 560;
+const NAVIGATOR_WIDTH_KEY = "termix.herdr.navigatorWidth";
 
 function coarsePointer(): boolean {
   return (
@@ -241,6 +245,53 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
   }, [keyBarSetting, touchDevice, isMobile]);
 
   const [navigatorOpen, setNavigatorOpen] = useState(false);
+  const [navigatorWidth, setNavigatorWidth] = useState<number>(() => {
+    try {
+      const raw =
+        typeof window !== "undefined"
+          ? window.localStorage.getItem(NAVIGATOR_WIDTH_KEY)
+          : null;
+      const num = raw ? Number(raw) : DEFAULT_NAVIGATOR_WIDTH;
+      return Number.isFinite(num)
+        ? Math.min(MAX_NAVIGATOR_WIDTH, Math.max(MIN_NAVIGATOR_WIDTH, num))
+        : DEFAULT_NAVIGATOR_WIDTH;
+    } catch {
+      return DEFAULT_NAVIGATOR_WIDTH;
+    }
+  });
+  useEffect(() => {
+    try {
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(
+          NAVIGATOR_WIDTH_KEY,
+          String(navigatorWidth),
+        );
+      }
+    } catch {
+      // Ignore storage errors.
+    }
+  }, [navigatorWidth]);
+
+  const startNavigatorResize = useCallback(
+    (event: React.MouseEvent) => {
+      event.preventDefault();
+      const startX = event.clientX;
+      const startW = navigatorWidth;
+      const onMove = (moveEvent: MouseEvent) => {
+        const next = startW - (moveEvent.clientX - startX);
+        setNavigatorWidth(
+          Math.min(MAX_NAVIGATOR_WIDTH, Math.max(MIN_NAVIGATOR_WIDTH, next)),
+        );
+      };
+      const onUp = () => {
+        window.removeEventListener("mousemove", onMove);
+        window.removeEventListener("mouseup", onUp);
+      };
+      window.addEventListener("mousemove", onMove);
+      window.addEventListener("mouseup", onUp);
+    },
+    [navigatorWidth],
+  );
   const [state, setState] = useState<HerdrState | null>(null);
   const snapshotRef = useRef<HerdrSnapshot | null>(null);
   const prevAgentStatusRef = useRef<Map<string, AgentStatus> | null>(null);
@@ -698,6 +749,7 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
           {showHcChrome && snapshot && (
             <HerdrAppStatusBar
               snapshot={snapshot}
+              run={run}
               sessions={sessions}
               activeSession={activeSession}
               onSelectSession={selectSession}
@@ -710,7 +762,19 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
           )}
         </div>
         {navigatorOpen && !isMobile && (
-          <aside className="w-80 shrink-0 border-l border-border">
+          <aside
+            style={{ width: `${navigatorWidth}px` }}
+            className="relative shrink-0 border-l border-border"
+          >
+            <div
+              role="separator"
+              aria-orientation="vertical"
+              title={t("chrome.resizeNavigator")}
+              data-testid="herdr-navigator-resize-handle"
+              onMouseDown={startNavigatorResize}
+              onDoubleClick={() => setNavigatorWidth(DEFAULT_NAVIGATOR_WIDTH)}
+              className="absolute inset-y-0 -left-1 z-10 w-2 cursor-col-resize transition-colors hover:bg-accent-brand/50"
+            />
             {navigator}
           </aside>
         )}

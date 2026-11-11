@@ -63,9 +63,10 @@ aren't obvious from the code, and anything that has bitten you before.
   `terminal.kill`, `terminal.label`, `view.json`) on headless servers. Because `hc attach <terminal>` is a
   raw PTY without an in-terminal TUI frame, `HerdrAppSidebar` (`src/frontend/HerdrAppSidebar.tsx`) and
   `HerdrAppTabBar` / `HerdrAppStatusBar` (`src/frontend/HerdrAppTabBar.tsx`) render the `herdr-app` Spaces +
-  Agents sidebar, top tab bar (`+` menu to start terminals or agents), pane header bar and bottom status bar
-  around the embedded terminal. Host setting `runtimeMode` (`auto`, `hc`, `legacy`) and user settings
-  `sidebarLayout` and `agentSort` configure this behavior.
+  Agents sidebar (with mouse-resizable width, vertical split ratio and instant filter), top tab bar (`+` menu
+  to start terminals or agents), pane header bar (with split switcher, click-to-copy `cwd` and inline quick
+  prompt bar) and bottom status bar around the embedded terminal. Host setting `runtimeMode` (`auto`, `hc`,
+  `legacy`) and user settings `sidebarLayout` and `agentSort` configure this behavior.
 - Touch as mouse (`TouchMouseLayer`) sits over the terminal and writes SGR (1006) mouse reports with
   `sendInput` (including two-finger tap as immediate right-click). It only shows while `MouseModeTracker`
   has seen herdr turn on modes 1000/1002/1003 in the output, so a plain shell never gets mouse bytes. Cell

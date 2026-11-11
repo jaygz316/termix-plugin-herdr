@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "@termix-ssh/plugin-sdk/frontend";
 import {
   Button,
@@ -20,8 +20,8 @@ import {
   Pin,
   PinOff,
   Plus,
+  Search,
   Server,
-  Trash2,
   X,
 } from "lucide-react";
 import type {
@@ -43,6 +43,44 @@ interface HerdrAppSidebarProps {
   onModeChange: (next: SidebarMode) => void;
   agentSort: AgentSortMode;
   onAgentSortChange: (next: AgentSortMode) => void;
+}
+
+const DEFAULT_SIDEBAR_WIDTH = 240;
+const MIN_SIDEBAR_WIDTH = 160;
+const MAX_SIDEBAR_WIDTH = 480;
+const SNAP_TO_RAIL_WIDTH = 110;
+const DEFAULT_SPLIT_RATIO = 0.52;
+const MIN_SPLIT_RATIO = 0.2;
+const MAX_SPLIT_RATIO = 0.8;
+
+const STORAGE_WIDTH_KEY = "termix.herdr.sidebarWidth";
+const STORAGE_SPLIT_KEY = "termix.herdr.sidebarSplitRatio";
+
+function readStoredNumber(
+  key: string,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  try {
+    const raw =
+      typeof window !== "undefined" ? window.localStorage.getItem(key) : null;
+    if (!raw) return fallback;
+    const num = Number(raw);
+    return Number.isFinite(num) ? Math.min(max, Math.max(min, num)) : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeStoredNumber(key: string, value: number): void {
+  try {
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(key, String(value));
+    }
+  } catch {
+    // Ignore storage errors in private browsing or restricted iframes.
+  }
 }
 
 const SPACE_COLORS = [
@@ -150,7 +188,8 @@ function SpaceStatusDot({ status }: { status: AgentStatus }) {
 
 /**
  * Left sidebar that mirrors the native `herdr-app` desktop layout (`mods/spaces`
- * on top, `mods/agents` on bottom, collapsible to a 44px numbered space rail).
+ * on top, `mods/agents` on bottom, collapsible to a 44px numbered space rail),
+ * with mouse-adjustable width, vertical split ratio, and quick search filter.
  */
 export function HerdrAppSidebar({
   snapshot,
@@ -162,7 +201,30 @@ export function HerdrAppSidebar({
 }: HerdrAppSidebarProps) {
   const { t } = useTranslation();
   const confirm = useConfirm();
+  const sidebarRef = useRef<HTMLElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() =>
+    readStoredNumber(
+      STORAGE_WIDTH_KEY,
+      DEFAULT_SIDEBAR_WIDTH,
+      MIN_SIDEBAR_WIDTH,
+      MAX_SIDEBAR_WIDTH,
+    ),
+  );
+  const [splitRatio, setSplitRatio] = useState<number>(() =>
+    readStoredNumber(
+      STORAGE_SPLIT_KEY,
+      DEFAULT_SPLIT_RATIO,
+      MIN_SPLIT_RATIO,
+      MAX_SPLIT_RATIO,
+    ),
+  );
+  const [draggingWidth, setDraggingWidth] = useState(false);
+  const [draggingSplit, setDraggingSplit] = useState(false);
+
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
   const [creatingSpace, setCreatingSpace] = useState(false);
   const [spaceName, setSpaceName] = useState("");
   const [spaceCwd, setSpaceCwd] = useState("");
@@ -171,17 +233,80 @@ export function HerdrAppSidebar({
   const [worktreeForWs, setWorktreeForWs] = useState<string | null>(null);
   const [wtBranch, setWtBranch] = useState("");
 
+  useEffect(() => {
+    writeStoredNumber(STORAGE_WIDTH_KEY, sidebarWidth);
+  }, [sidebarWidth]);
+
+  useEffect(() => {
+    writeStoredNumber(STORAGE_SPLIT_KEY, splitRatio);
+  }, [splitRatio]);
+
+  function startHorizontalResize(event: React.MouseEvent) {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = mode === "rail" ? 44 : sidebarWidth;
+    setDraggingWidth(true);
+
+    const onMove = (moveEvent: MouseEvent) => {
+      const next = startWidth + (moveEvent.clientX - startX);
+      if (next < SNAP_TO_RAIL_WIDTH) {
+        if (mode !== "rail") onModeChange("rail");
+        return;
+      }
+      if (mode === "rail") onModeChange("expanded");
+      setSidebarWidth(
+        Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, next)),
+      );
+    };
+
+    const onUp = () => {
+      setDraggingWidth(false);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
+  function startVerticalSplitResize(event: React.MouseEvent) {
+    event.preventDefault();
+    const container = bodyRef.current;
+    if (!container) return;
+    setDraggingSplit(true);
+
+    const onMove = (moveEvent: MouseEvent) => {
+      const rect = container.getBoundingClientRect();
+      if (rect.height <= 0) return;
+      const ratio = (moveEvent.clientY - rect.top) / rect.height;
+      setSplitRatio(
+        Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio)),
+      );
+    };
+
+    const onUp = () => {
+      setDraggingSplit(false);
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
+
   if (mode === "hidden") return null;
 
-  const workspaces = [...snapshot.workspaces].sort(
+  const allWorkspaces = [...snapshot.workspaces].sort(
     (a, b) => a.number - b.number,
   );
-  const workspaceById = new Map(workspaces.map((ws) => [ws.workspace_id, ws]));
+  const workspaceById = new Map(
+    allWorkspaces.map((ws) => [ws.workspace_id, ws]),
+  );
 
   if (mode === "rail") {
     return (
       <aside
-        className="flex w-11 shrink-0 flex-col items-center justify-between border-r border-border bg-background/60 py-2 select-none"
+        className="relative flex w-11 shrink-0 flex-col items-center justify-between border-r border-border bg-background/60 py-2 select-none"
         data-testid="herdr-app-rail"
       >
         <div className="flex flex-col items-center gap-1.5">
@@ -192,7 +317,7 @@ export function HerdrAppSidebar({
             <PanelLeftOpen className="size-4" />
           </ListRowAction>
           <div className="my-0.5 h-px w-6 bg-border" />
-          {workspaces.map((ws, idx) => {
+          {allWorkspaces.map((ws, idx) => {
             const color = spaceColor(idx);
             return (
               <button
@@ -247,15 +372,61 @@ export function HerdrAppSidebar({
             <span className="absolute right-0.5 top-0.5 size-2 rounded-full bg-amber-400" />
           )}
         </button>
+
+        {/* Drag handle on the rail's right edge to pull it open with the mouse */}
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          title={t("chrome.resizeSidebar")}
+          onMouseDown={startHorizontalResize}
+          onDoubleClick={() => {
+            setSidebarWidth(DEFAULT_SIDEBAR_WIDTH);
+            onModeChange("expanded");
+          }}
+          className="absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize hover:bg-accent-brand/50"
+        />
       </aside>
     );
   }
 
+  const normalizedFilter = searchQuery.trim().toLowerCase();
+  const workspaces = normalizedFilter
+    ? allWorkspaces.filter((ws) => {
+        const hay = [
+          ws.label,
+          ws.machine ?? "",
+          ws.folder ?? "",
+          ws.worktree?.branch ?? "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(normalizedFilter);
+      })
+    : allWorkspaces;
+
+  const filteredAgents = normalizedFilter
+    ? snapshot.agents.filter((a) => {
+        const ws = workspaceById.get(a.workspace_id);
+        const hay = [
+          paneTitle(a),
+          a.agent ?? "",
+          a.status_msg ?? "",
+          a.machine ?? "",
+          ws?.label ?? "",
+        ]
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(normalizedFilter);
+      })
+    : snapshot.agents;
+
   // Group workspaces by machine: local ("This computer") first, then remote machines
   const localSpaces = workspaces.filter((w) => !w.machine);
   const remoteMachineNames = new Set<string>();
-  for (const m of snapshot.machines ?? []) {
-    if (m.name) remoteMachineNames.add(m.name);
+  if (!normalizedFilter) {
+    for (const m of snapshot.machines ?? []) {
+      if (m.name) remoteMachineNames.add(m.name);
+    }
   }
   for (const w of workspaces) {
     if (w.machine) remoteMachineNames.add(w.machine);
@@ -266,9 +437,9 @@ export function HerdrAppSidebar({
   const showMachineHeaders = remoteMachineNames.size > 0;
 
   // Organize agents into Pinned + Priority or Grouped sections
-  const topAgents = snapshot.agents.filter((a) => !a.parent_id);
+  const topAgents = filteredAgents.filter((a) => !a.parent_id);
   const childrenByParent = new Map<string, HerdrPane[]>();
-  for (const a of snapshot.agents) {
+  for (const a of filteredAgents) {
     if (!a.parent_id) continue;
     const list = childrenByParent.get(a.parent_id) ?? [];
     list.push(a);
@@ -305,7 +476,7 @@ export function HerdrAppSidebar({
       agentSections.push({ title: t("chrome.idle"), items: idle });
     }
   } else {
-    for (const ws of workspaces) {
+    for (const ws of allWorkspaces) {
       const inSpace = unpinnedAgents.filter(
         (a) => a.workspace_id === ws.workspace_id,
       );
@@ -372,6 +543,7 @@ export function HerdrAppSidebar({
           <div
             role="button"
             tabIndex={0}
+            title={ws.folder ? `${label} (${ws.folder})` : label}
             onClick={() =>
               void run("workspace.focus", { workspaceId: ws.workspace_id })
             }
@@ -395,6 +567,11 @@ export function HerdrAppSidebar({
               {spaceInitial(label)}
             </span>
             <span className="min-w-0 flex-1 truncate">{label}</span>
+            {ws.tab_count > 1 && (
+              <span className="shrink-0 rounded bg-muted/70 px-1 text-[10px] text-muted-foreground group-hover:hidden">
+                {ws.tab_count}
+              </span>
+            )}
             <SpaceStatusDot status={ws.agent_status} />
             <div className="hidden items-center gap-0.5 group-hover:flex">
               <button
@@ -493,7 +670,9 @@ export function HerdrAppSidebar({
 
   return (
     <aside
-      className="flex w-60 shrink-0 flex-col border-r border-border bg-background/50 select-none"
+      ref={sidebarRef}
+      style={{ width: `${sidebarWidth}px` }}
+      className="relative flex shrink-0 flex-col border-r border-border bg-background/50 select-none"
       data-testid="herdr-app-sidebar"
     >
       {/* Top chrome header */}
@@ -502,301 +681,404 @@ export function HerdrAppSidebar({
           <Bot className="size-3.5 text-accent-brand" />
           <span>{t("tab.title")}</span>
         </div>
-        <ListRowAction
-          label={t("toolbar.sidebarCollapse")}
-          onClick={() => onModeChange("rail")}
-        >
-          <PanelLeftClose className="size-3.5" />
-        </ListRowAction>
-      </div>
-
-      {/* Upper half: Spaces */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-1.5 py-2">
-        <div className="mb-1 flex items-center justify-between px-1.5">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {t("chrome.spaces")}
-          </span>
-          <div className="flex items-center gap-0.5">
-            <ListRowAction
-              label={t("navigator.newWorkspaceWithOptions")}
-              onClick={() => setCreatingSpace((open) => !open)}
-            >
-              <FolderPlus className="size-3.5" />
-            </ListRowAction>
-            <ListRowAction
-              label={t("chrome.newSpace")}
-              onClick={() => void run("workspace.create")}
-            >
-              <Plus className="size-3.5" />
-            </ListRowAction>
-          </div>
-        </div>
-
-        {creatingSpace && (
-          <form
-            className="mb-2 flex flex-col gap-1.5 rounded border border-border bg-background p-2"
-            onSubmit={(e) => {
-              e.preventDefault();
-              const label = spaceName.trim();
-              const cwd = spaceCwd.trim();
-              setCreatingSpace(false);
-              setSpaceName("");
-              setSpaceCwd("");
-              void run("workspace.create", {
-                ...(label ? { label } : {}),
-                ...(cwd ? { cwd } : {}),
+        <div className="flex items-center gap-0.5">
+          <ListRowAction
+            label={t("chrome.search")}
+            tone={searchOpen || Boolean(searchQuery) ? "brand" : "default"}
+            onClick={() => {
+              setSearchOpen((open) => {
+                if (open) setSearchQuery("");
+                return !open;
               });
             }}
           >
-            <input
-              autoFocus
-              aria-label={t("navigator.workspaceLabel")}
-              placeholder={t("navigator.workspaceLabelPlaceholder")}
-              value={spaceName}
-              onChange={(e) => setSpaceName(e.target.value)}
-              className="h-7 rounded border border-border bg-transparent px-2 text-xs"
-            />
-            <input
-              aria-label={t("navigator.workspaceCwd")}
-              placeholder={t("navigator.workspaceCwdPlaceholder")}
-              value={spaceCwd}
-              onChange={(e) => setSpaceCwd(e.target.value)}
-              className="h-7 rounded border border-border bg-transparent px-2 text-xs"
-            />
-            <div className="flex justify-end gap-1">
-              <Button
-                size="sm"
-                variant="outline"
-                type="button"
-                onClick={() => setCreatingSpace(false)}
-              >
-                {t("navigator.cancel")}
-              </Button>
-              <Button size="sm" type="submit">
-                {t("navigator.create")}
-              </Button>
-            </div>
-          </form>
-        )}
-
-        {showMachineHeaders && (
-          <div className="mt-1 mb-0.5 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground">
-            <Monitor className="size-3" />
-            <span className="truncate">{t("chrome.thisComputer")}</span>
-          </div>
-        )}
-
-        <div className="flex flex-col gap-0.5">
-          {localSpaces.map((ws, idx) => renderSpaceRow(ws, idx))}
-        </div>
-
-        {[...remoteMachineNames].map((machineName) => {
-          const info = machineInfoMap.get(machineName);
-          const connected = !info?.state || info.state === "connected";
-          const machineSpaces = workspaces.filter(
-            (w) => w.machine === machineName,
-          );
-          return (
-            <div key={machineName} className="mt-2.5 flex flex-col gap-0.5">
-              <div className="flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
-                <Server className="size-3 shrink-0" />
-                <span className="min-w-0 flex-1 truncate">{machineName}</span>
-                <span
-                  className={cn(
-                    "size-1.5 shrink-0 rounded-full",
-                    connected ? "bg-emerald-400" : "bg-muted-foreground/40",
-                  )}
-                  title={info?.state ?? "connected"}
-                />
-              </div>
-              {machineSpaces.map((ws, idx) =>
-                renderSpaceRow(ws, localSpaces.length + idx),
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Lower half: Agents */}
-      <div className="flex min-h-0 flex-1 flex-col border-t border-border overflow-y-auto px-1.5 py-2">
-        <div className="mb-1 flex items-center justify-between px-1.5">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {t("chrome.agents")}
-          </span>
-          <button
-            type="button"
-            title={t("chrome.sortToggleHint")}
-            onClick={() =>
-              onAgentSortChange(
-                agentSort === "priority" ? "grouped" : "priority",
-              )
-            }
-            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            <Search className="size-3.5" />
+          </ListRowAction>
+          <ListRowAction
+            label={t("toolbar.sidebarCollapse")}
+            onClick={() => onModeChange("rail")}
           >
-            <ArrowUpDown className="size-2.5" />
-            <span>
-              {agentSort === "priority"
-                ? t("chrome.sortPriority")
-                : t("chrome.sortGrouped")}
+            <PanelLeftClose className="size-3.5" />
+          </ListRowAction>
+        </div>
+      </div>
+
+      {/* Instant Filter / Quick Switcher bar */}
+      {searchOpen && (
+        <div className="flex items-center gap-1 border-b border-border px-2 py-1.5">
+          <Search className="size-3 shrink-0 text-muted-foreground" />
+          <input
+            autoFocus
+            aria-label={t("chrome.search")}
+            placeholder={t("chrome.searchPlaceholder")}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setSearchQuery("");
+                setSearchOpen(false);
+              } else if (e.key === "Enter") {
+                e.preventDefault();
+                if (filteredAgents[0]) {
+                  void run("pane.focus", { paneId: filteredAgents[0].pane_id });
+                  setSearchQuery("");
+                  setSearchOpen(false);
+                } else if (workspaces[0]) {
+                  void run("workspace.focus", {
+                    workspaceId: workspaces[0].workspace_id,
+                  });
+                  setSearchQuery("");
+                  setSearchOpen(false);
+                }
+              }
+            }}
+            className="h-6 min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:text-muted-foreground"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="rounded p-0.5 text-muted-foreground hover:text-foreground"
+            >
+              <X className="size-3" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Split body: Spaces (top) + Resizable Divider + Agents (bottom) */}
+      <div ref={bodyRef} className="flex min-h-0 flex-1 flex-col">
+        {/* Upper half: Spaces */}
+        <div
+          style={{ flex: `${splitRatio} 1 0%` }}
+          className="flex min-h-0 flex-col overflow-y-auto px-1.5 py-2"
+        >
+          <div className="mb-1 flex items-center justify-between px-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("chrome.spaces")}
             </span>
-          </button>
+            <div className="flex items-center gap-0.5">
+              <ListRowAction
+                label={t("navigator.newWorkspaceWithOptions")}
+                onClick={() => setCreatingSpace((open) => !open)}
+              >
+                <FolderPlus className="size-3.5" />
+              </ListRowAction>
+              <ListRowAction
+                label={t("chrome.newSpace")}
+                onClick={() => void run("workspace.create")}
+              >
+                <Plus className="size-3.5" />
+              </ListRowAction>
+            </div>
+          </div>
+
+          {creatingSpace && (
+            <form
+              className="mb-2 flex flex-col gap-1.5 rounded border border-border bg-background p-2"
+              onSubmit={(e) => {
+                e.preventDefault();
+                const label = spaceName.trim();
+                const cwd = spaceCwd.trim();
+                setCreatingSpace(false);
+                setSpaceName("");
+                setSpaceCwd("");
+                void run("workspace.create", {
+                  ...(label ? { label } : {}),
+                  ...(cwd ? { cwd } : {}),
+                });
+              }}
+            >
+              <input
+                autoFocus
+                aria-label={t("navigator.workspaceLabel")}
+                placeholder={t("navigator.workspaceLabelPlaceholder")}
+                value={spaceName}
+                onChange={(e) => setSpaceName(e.target.value)}
+                className="h-7 rounded border border-border bg-transparent px-2 text-xs"
+              />
+              <input
+                aria-label={t("navigator.workspaceCwd")}
+                placeholder={t("navigator.workspaceCwdPlaceholder")}
+                value={spaceCwd}
+                onChange={(e) => setSpaceCwd(e.target.value)}
+                className="h-7 rounded border border-border bg-transparent px-2 text-xs"
+              />
+              <div className="flex justify-end gap-1">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  type="button"
+                  onClick={() => setCreatingSpace(false)}
+                >
+                  {t("navigator.cancel")}
+                </Button>
+                <Button size="sm" type="submit">
+                  {t("navigator.create")}
+                </Button>
+              </div>
+            </form>
+          )}
+
+          {showMachineHeaders && localSpaces.length > 0 && (
+            <div className="mt-1 mb-0.5 flex items-center gap-1.5 px-2 text-[11px] font-medium text-muted-foreground">
+              <Monitor className="size-3" />
+              <span className="truncate">{t("chrome.thisComputer")}</span>
+            </div>
+          )}
+
+          <div className="flex flex-col gap-0.5">
+            {localSpaces.map((ws, idx) => renderSpaceRow(ws, idx))}
+          </div>
+
+          {[...remoteMachineNames].map((machineName) => {
+            const info = machineInfoMap.get(machineName);
+            const connected = !info?.state || info.state === "connected";
+            const machineSpaces = workspaces.filter(
+              (w) => w.machine === machineName,
+            );
+            return (
+              <div key={machineName} className="mt-2.5 flex flex-col gap-0.5">
+                <div className="flex items-center gap-1.5 px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                  <Server className="size-3 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{machineName}</span>
+                  <span
+                    className={cn(
+                      "size-1.5 shrink-0 rounded-full",
+                      connected ? "bg-emerald-400" : "bg-muted-foreground/40",
+                    )}
+                    title={info?.state ?? "connected"}
+                  />
+                </div>
+                {machineSpaces.map((ws, idx) =>
+                  renderSpaceRow(ws, localSpaces.length + idx),
+                )}
+              </div>
+            );
+          })}
+
+          {normalizedFilter && workspaces.length === 0 && (
+            <div className="px-2 py-2 text-center text-xs text-muted-foreground">
+              {t("chrome.noMatches")}
+            </div>
+          )}
         </div>
 
-        {agentSections.length === 0 ? (
-          <div className="px-2 py-4 text-center text-xs text-muted-foreground">
-            {t("chrome.noAgents")}
+        {/* Horizontal drag handle between Spaces and Agents */}
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          title={t("chrome.resizeSplit")}
+          data-testid="herdr-sidebar-split-handle"
+          onMouseDown={startVerticalSplitResize}
+          onDoubleClick={() => setSplitRatio(DEFAULT_SPLIT_RATIO)}
+          className={cn(
+            "h-1.5 shrink-0 cursor-row-resize border-t border-border transition-colors hover:bg-accent-brand/50",
+            draggingSplit && "bg-accent-brand/70",
+          )}
+        />
+
+        {/* Lower half: Agents */}
+        <div
+          style={{ flex: `${1 - splitRatio} 1 0%` }}
+          className="flex min-h-0 flex-col overflow-y-auto px-1.5 py-2"
+        >
+          <div className="mb-1 flex items-center justify-between px-1.5">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {t("chrome.agents")}
+            </span>
+            <button
+              type="button"
+              title={t("chrome.sortToggleHint")}
+              onClick={() =>
+                onAgentSortChange(
+                  agentSort === "priority" ? "grouped" : "priority",
+                )
+              }
+              className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <ArrowUpDown className="size-2.5" />
+              <span>
+                {agentSort === "priority"
+                  ? t("chrome.sortPriority")
+                  : t("chrome.sortGrouped")}
+              </span>
+            </button>
           </div>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {agentSections.map((section) => (
-              <div key={section.title} className="flex flex-col gap-0.5">
-                <div className="px-2 text-[10px] font-medium text-muted-foreground/80">
-                  {section.title}
-                </div>
-                {section.items.map((agent) => {
-                  const ws = workspaceById.get(agent.workspace_id);
-                  const spaceLabel = ws
-                    ? displaySpaceLabel(ws)
-                    : agent.workspace_id;
-                  const detail =
-                    agent.status_msg ||
-                    (agent.foreground_cwd ?? agent.cwd ?? "")
-                      .split("/")
-                      .filter(Boolean)
-                      .pop() ||
-                    "";
-                  const subAgents =
-                    childrenByParent.get(agent.terminal_id ?? agent.pane_id) ??
-                    [];
 
-                  return (
-                    <div key={agent.pane_id} className="flex flex-col">
-                      <div
-                        role="button"
-                        tabIndex={0}
-                        onClick={() =>
-                          void run("pane.focus", { paneId: agent.pane_id })
-                        }
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            void run("pane.focus", { paneId: agent.pane_id });
-                          }
-                        }}
-                        className={cn(
-                          "group flex flex-col gap-0.5 rounded-md px-2 py-1 text-xs cursor-pointer transition-colors",
-                          agent.focused
-                            ? "bg-accent-brand/15 text-foreground"
-                            : "hover:bg-muted/60",
-                        )}
-                      >
-                        <div className="flex items-center gap-1.5">
-                          <span className="min-w-0 flex-1 truncate font-medium text-foreground">
-                            {paneTitle(agent)}
-                          </span>
-                          <div className="hidden items-center gap-0.5 group-hover:flex">
-                            <button
-                              type="button"
-                              title={t(
-                                agent.pinned
-                                  ? "navigator.unpinAgent"
-                                  : "navigator.pinAgent",
-                              )}
-                              aria-label={t(
-                                agent.pinned
-                                  ? "navigator.unpinAgent"
-                                  : "navigator.pinAgent",
-                              )}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void run("agent.pin", {
-                                  paneId: agent.pane_id,
-                                  pinned: !agent.pinned,
-                                });
-                              }}
-                              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-                            >
-                              {agent.pinned ? (
-                                <PinOff className="size-3" />
-                              ) : (
-                                <Pin className="size-3" />
-                              )}
-                            </button>
-                            <button
-                              type="button"
-                              title={t("navigator.interruptPane")}
-                              aria-label={t("navigator.interruptPane")}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void run("pane.interrupt", {
-                                  paneId: agent.pane_id,
-                                });
-                              }}
-                              className="rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
-                            >
-                              <OctagonX className="size-3" />
-                            </button>
-                          </div>
-                          <StatusIndicator status={agent.agent_status} />
-                        </div>
-                        <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                          <span className="truncate">
-                            {detail ? `${spaceLabel} · ${detail}` : spaceLabel}
-                          </span>
-                          {agent.machine && (
-                            <span className="ml-auto shrink-0 rounded bg-muted px-1 text-[10px]">
-                              {agent.machine}
-                            </span>
-                          )}
-                        </div>
-                      </div>
+          {agentSections.length === 0 ? (
+            <div className="px-2 py-4 text-center text-xs text-muted-foreground">
+              {normalizedFilter ? t("chrome.noMatches") : t("chrome.noAgents")}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {agentSections.map((section) => (
+                <div key={section.title} className="flex flex-col gap-0.5">
+                  <div className="px-2 text-[10px] font-medium text-muted-foreground/80">
+                    {section.title}
+                  </div>
+                  {section.items.map((agent) => {
+                    const ws = workspaceById.get(agent.workspace_id);
+                    const spaceLabel = ws
+                      ? displaySpaceLabel(ws)
+                      : agent.workspace_id;
+                    const detail =
+                      agent.status_msg ||
+                      (agent.foreground_cwd ?? agent.cwd ?? "")
+                        .split("/")
+                        .filter(Boolean)
+                        .pop() ||
+                      "";
+                    const subAgents =
+                      childrenByParent.get(
+                        agent.terminal_id ?? agent.pane_id,
+                      ) ?? [];
 
-                      {agent.agent_status === "blocked" && (
-                        <div className="flex flex-wrap items-center gap-1 px-2 py-1">
-                          {QUICK_APPROVAL_KEYS.map((item) => (
-                            <button
-                              key={item.label}
-                              type="button"
-                              onClick={() =>
-                                void run("pane.sendKeys", {
-                                  paneId: agent.pane_id,
-                                  keys: item.keys,
-                                })
-                              }
-                              className="h-5 rounded border border-border bg-background px-1.5 text-[10px] hover:bg-muted"
-                            >
-                              {item.label}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-
-                      {subAgents.map((sub, idx) => (
-                        <button
-                          key={sub.pane_id}
-                          type="button"
+                    return (
+                      <div key={agent.pane_id} className="flex flex-col">
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() =>
-                            void run("pane.focus", { paneId: sub.pane_id })
+                            void run("pane.focus", { paneId: agent.pane_id })
                           }
-                          className="flex items-center gap-1.5 rounded px-2 py-0.5 pl-4 text-left text-[11px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              void run("pane.focus", { paneId: agent.pane_id });
+                            }
+                          }}
+                          className={cn(
+                            "group flex flex-col gap-0.5 rounded-md px-2 py-1 text-xs cursor-pointer transition-colors",
+                            agent.focused
+                              ? "bg-accent-brand/15 text-foreground"
+                              : "hover:bg-muted/60",
+                          )}
                         >
-                          <span className="font-mono text-muted-foreground/60">
-                            {idx === subAgents.length - 1 ? "└" : "├"}
-                          </span>
-                          <span className="min-w-0 flex-1 truncate">
-                            {paneTitle(sub)}
-                          </span>
-                          <StatusIndicator status={sub.agent_status} />
-                        </button>
-                      ))}
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        )}
+                          <div className="flex items-center gap-1.5">
+                            <span className="min-w-0 flex-1 truncate font-medium text-foreground">
+                              {paneTitle(agent)}
+                            </span>
+                            <div className="hidden items-center gap-0.5 group-hover:flex">
+                              <button
+                                type="button"
+                                title={t(
+                                  agent.pinned
+                                    ? "navigator.unpinAgent"
+                                    : "navigator.pinAgent",
+                                )}
+                                aria-label={t(
+                                  agent.pinned
+                                    ? "navigator.unpinAgent"
+                                    : "navigator.pinAgent",
+                                )}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void run("agent.pin", {
+                                    paneId: agent.pane_id,
+                                    pinned: !agent.pinned,
+                                  });
+                                }}
+                                className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+                              >
+                                {agent.pinned ? (
+                                  <PinOff className="size-3" />
+                                ) : (
+                                  <Pin className="size-3" />
+                                )}
+                              </button>
+                              <button
+                                type="button"
+                                title={t("navigator.interruptPane")}
+                                aria-label={t("navigator.interruptPane")}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  void run("pane.interrupt", {
+                                    paneId: agent.pane_id,
+                                  });
+                                }}
+                                className="rounded p-0.5 text-muted-foreground hover:bg-destructive/20 hover:text-destructive"
+                              >
+                                <OctagonX className="size-3" />
+                              </button>
+                            </div>
+                            <StatusIndicator status={agent.agent_status} />
+                          </div>
+                          <div className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                            <span className="truncate">
+                              {detail
+                                ? `${spaceLabel} · ${detail}`
+                                : spaceLabel}
+                            </span>
+                            {agent.machine && (
+                              <span className="ml-auto shrink-0 rounded bg-muted px-1 text-[10px]">
+                                {agent.machine}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        {agent.agent_status === "blocked" && (
+                          <div className="flex flex-wrap items-center gap-1 px-2 py-1">
+                            {QUICK_APPROVAL_KEYS.map((item) => (
+                              <button
+                                key={item.label}
+                                type="button"
+                                onClick={() =>
+                                  void run("pane.sendKeys", {
+                                    paneId: agent.pane_id,
+                                    keys: item.keys,
+                                  })
+                                }
+                                className="h-5 rounded border border-border bg-background px-1.5 text-[10px] hover:bg-muted"
+                              >
+                                {item.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+
+                        {subAgents.map((sub, idx) => (
+                          <button
+                            key={sub.pane_id}
+                            type="button"
+                            onClick={() =>
+                              void run("pane.focus", { paneId: sub.pane_id })
+                            }
+                            className="flex items-center gap-1.5 rounded px-2 py-0.5 pl-4 text-left text-[11px] text-muted-foreground hover:bg-muted/60 hover:text-foreground"
+                          >
+                            <span className="font-mono text-muted-foreground/60">
+                              {idx === subAgents.length - 1 ? "└" : "├"}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate">
+                              {paneTitle(sub)}
+                            </span>
+                            <StatusIndicator status={sub.agent_status} />
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
+
+      {/* Right-edge mouse resize handle */}
+      <div
+        role="separator"
+        aria-orientation="vertical"
+        title={t("chrome.resizeSidebar")}
+        data-testid="herdr-sidebar-resize-handle"
+        onMouseDown={startHorizontalResize}
+        onDoubleClick={() => setSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
+        className={cn(
+          "absolute inset-y-0 -right-1 z-10 w-2 cursor-col-resize transition-colors hover:bg-accent-brand/50",
+          draggingWidth && "bg-accent-brand/70",
+        )}
+      />
     </aside>
   );
 }
