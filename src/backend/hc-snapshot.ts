@@ -387,10 +387,10 @@ export function buildStateScript(binary: string, session: string): string {
   const prefix = session ? `"$H" --session ${shQuote(session)}` : `"$H"`;
 
   const autoDetectHc =
-    binary === DEFAULT_BINARY
+    binary === DEFAULT_BINARY && !session.startsWith("termix-it-")
       ? [
           'if command -v hc >/dev/null 2>&1; then HC_BIN=hc; elif command -v herdr-core >/dev/null 2>&1; then HC_BIN=herdr-core; else HC_BIN=""; fi',
-          `if [ -n "$HC_BIN" ] && ! ${prefix} status server >/dev/null 2>&1; then`,
+          'if [ -n "$HC_BIN" ]; then',
           ...hcCollectCommands("$HC_BIN", session).map((line) => `  ${line}`),
           "  exit 0",
           "fi",

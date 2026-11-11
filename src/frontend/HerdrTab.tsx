@@ -267,8 +267,6 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
           const initialTerm = nextState.snapshot.focused_terminal_id ?? null;
           setRuntime("hc");
           setAttachedTerminalId(initialTerm);
-          setHandle(null);
-          setInstanceId(newInstanceId());
         }
         const prev = prevAgentStatusRef.current;
         const nextMap = new Map<string, AgentStatus>();
@@ -362,8 +360,19 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
         await api.action(action, params);
         if (nextTerm && nextTerm !== attachedTerminalRef.current) {
           setAttachedTerminalId(nextTerm);
-          setHandle(null);
-          setInstanceId(newInstanceId());
+          const nextCmd = herdrLaunchCommand(host, sessionOverride, {
+            runtime: "hc",
+            terminalId: nextTerm,
+          });
+          if (handle && nextCmd) {
+            handle.sendInput("\x1c");
+            window.setTimeout(() => {
+              handle.sendInput(`${nextCmd}\r`);
+            }, 60);
+          } else {
+            setHandle(null);
+            setInstanceId(newInstanceId());
+          }
         }
         void refresh();
         return true;
@@ -395,7 +404,7 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
         return false;
       }
     },
-    [api, confirm, refresh, t, toast],
+    [api, confirm, handle, host, refresh, sessionOverride, t, toast],
   );
 
   const selectSession = useCallback(
@@ -580,17 +589,19 @@ export function HerdrTab({ tab, host, isVisible, handleRef }: TabProps) {
             ref={terminalRef}
             className="relative min-h-0 flex-1 overflow-hidden"
           >
-            <TerminalView
-              key={instanceId}
-              handleRef={setTerminalHandle}
-              hostConfig={terminalHostConfig}
-              isVisible={isVisible}
-              title={host.name}
-              showTitle={false}
-              splitScreen={false}
-              executeCommand={launch}
-              disableAutoFocus={touchDevice}
-            />
+            {state !== null && (
+              <TerminalView
+                key={instanceId}
+                handleRef={setTerminalHandle}
+                hostConfig={terminalHostConfig}
+                isVisible={isVisible}
+                title={host.name}
+                showTitle={false}
+                splitScreen={false}
+                executeCommand={launch}
+                disableAutoFocus={touchDevice}
+              />
+            )}
             {layerActive && (
               <TouchMouseLayer
                 readGrid={readGrid}

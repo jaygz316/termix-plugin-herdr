@@ -96,7 +96,7 @@ export function buildSessionsScript(binary: string): string {
     binary === DEFAULT_BINARY
       ? [
           'if command -v hc >/dev/null 2>&1; then HC_BIN=hc; elif command -v herdr-core >/dev/null 2>&1; then HC_BIN=herdr-core; else HC_BIN=""; fi',
-          'if [ -n "$HC_BIN" ] && ! "$H" status server >/dev/null 2>&1; then',
+          'if [ -n "$HC_BIN" ]; then',
           ...hcCollect.map((l) => `  ${l}`),
           "  exit 0",
           "fi",
